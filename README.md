@@ -1,201 +1,159 @@
-# mcp-server-oncalls
+# MCP Registry
 
-MCP (Model Context Protocol) server for the [OnCalls](https://oncalls.com) physician on-call scheduling system.
+The MCP registry provides MCP clients with a list of MCP servers, like an app store for MCP servers.
 
-Enables AI assistants like Claude to query schedules, submit requests, and manage on-call operations through natural language.
+📖 **[Full documentation](./docs)**
 
-## Features
+## Development Status
 
-- **Query on-call schedules** - "Who's on call today?"
-- **View your schedule** - "What's my schedule this month?"
-- **Find physician contacts** - "What's Dr. Smith's pager number?"
-- **Submit requests** - "I need January 20th off" *(coming soon)*
-- **Admin operations** - "Approve Dr. Smith's day off request" *(admin only)*
+> [!WARNING]  
+> The registry is under [active development](#development-status). The registry API spec is unstable and the official MCP registry database may be wiped at any time.
 
-## Installation
+**2025-09-04 update**: We're targeting a 'preview' go-live on 8th September. This may still be unstable and not provide durability guarantees, but is a step towards being more solidified. A general availability (GA) release will follow later.
 
-```bash
-npm install -g mcp-server-oncalls
-```
-
-Or use directly with npx:
-
-```bash
-npx mcp-server-oncalls
-```
-
-## Configuration
-
-### Claude Desktop
-
-Add to your Claude Desktop configuration file:
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "oncalls": {
-      "command": "npx",
-      "args": ["mcp-server-oncalls"],
-      "env": {
-        "ONCALLS_USERNAME": "your_username",
-        "ONCALLS_PASSWORD": "your_password",
-        "ONCALLS_API_URL": "https://oncalls.com/api"
-      }
-    }
-  }
-}
-```
-
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ONCALLS_USERNAME` | Yes | Your OnCalls login username |
-| `ONCALLS_PASSWORD` | Yes | Your OnCalls login password |
-| `ONCALLS_API_URL` | Yes | OnCalls API URL (e.g., `https://oncalls.com/api`) |
-
-## Available Tools
-
-### For All Users
-
-| Tool | Description |
-|------|-------------|
-| `get-oncall-schedule` | Get who's on call for a specific date |
-| `get-my-schedule` | View your own on-call schedule |
-| `get-physician-contact` | Look up a physician's contact info |
-| `get-shift-types` | List available shift types in your group |
-| `get-my-requests` | View your submitted requests |
-
-### For Administrators
-
-| Tool | Description |
-|------|-------------|
-| `list-pending-requests` | View requests awaiting approval |
-| `list-pending-volunteers` | View volunteers awaiting approval |
-| `list-members` | List all members in your group |
-
-## Example Conversations
-
-**Checking who's on call:**
-```
-You: Who's on call for OB-GYN today?
-
-Claude: Today (January 12, 2026), Dr. Sarah Johnson is on call for OB-GYN.
-- Phone: (555) 123-4567
-- Pager: 5551234
-```
-
-**Viewing your schedule:**
-```
-You: What's my schedule next week?
-
-Claude: Here's your schedule for January 13-19:
-- Jan 14 (Tue): Night Shift
-- Jan 17 (Fri): OB-GYN Call
-```
-
-**Admin reviewing requests:**
-```
-You: Show me pending requests
-
-Claude: You have 3 pending requests:
-1. Dr. Smith - Day Off - Jan 20
-2. Dr. Chen - Switch - Jan 22
-3. Dr. Patel - Day Off - Jan 25
-```
-
-## Remote Server Deployment
-
-For organizations that want a hosted MCP server (so users don't need to install locally):
-
-### Deploy to Railway
-
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template)
-
-1. Connect your GitHub repository
-2. Set environment variable: `ONCALLS_BASE_URL=https://your-oncalls-instance.com/api`
-3. Railway will automatically deploy
-
-### Docker
-
-```bash
-docker run -p 3001:3001 \
-  -e ONCALLS_BASE_URL=https://oncalls.com/api \
-  mcp-server-oncalls-remote
-```
-
-### Connect Claude to Remote Server
-
-Once deployed, users authenticate with their own OnCalls credentials via headers:
-
-```
-GET https://your-mcp-server.railway.app/sse
-Headers:
-  X-OnCalls-Username: user123
-  X-OnCalls-Password: password
-```
-
-Or via Bearer token (base64 encoded `username:password`):
-
-```
-Authorization: Bearer dXNlcjEyMzpwYXNzd29yZA==
-```
-
-## Development
-
-```bash
-# Clone the repository
-git clone https://github.com/jacobmr/mcp-server-oncalls.git
-cd mcp-server-oncalls
-
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Run local server
-npm start
-
-# Run remote server
-ONCALLS_BASE_URL=https://v3.oncalls.com/api npm run start:remote
-
-# Run tests
-npm test
-
-# Development mode (watch)
-npm run dev
-```
-
-### Testing with MCP Inspector
-
-```bash
-# Build first
-npm run build
-
-# Run with inspector (local mode)
-npx @modelcontextprotocol/inspector node dist/index.js
-```
-
-## Security
-
-- Credentials are passed via environment variables, never logged
-- JWT tokens stored in memory only, never persisted
-- All API communication over HTTPS
-- Role-based access control enforced for admin tools
-
-## License
-
-MIT
+Current key maintainers:
+- **Adam Jones** (Anthropic) [@domdomegg](https://github.com/domdomegg)  
+- **Tadas Antanavicius** (PulseMCP) [@tadasant](https://github.com/tadasant)
+- **Toby Padilla** (GitHub) [@toby](https://github.com/toby)
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request.
+We use multiple channels for collaboration - see [modelcontextprotocol.io/community/communication](https://modelcontextprotocol.io/community/communication).
 
-## Support
+Often (but not always) ideas flow through this pipeline:
 
-- **OnCalls Support**: [oncalls.com/contact](https://oncalls.com/contact)
-- **MCP Issues**: [GitHub Issues](https://github.com/jacobmr/mcp-server-oncalls/issues)
+- **[Discord](https://modelcontextprotocol.io/community/communication)** - Real-time community discussions
+- **[Discussions](https://github.com/modelcontextprotocol/registry/discussions)** - Propose and discuss product/technical requirements
+- **[Issues](https://github.com/modelcontextprotocol/registry/issues)** - Track well-scoped technical work  
+- **[Pull Requests](https://github.com/modelcontextprotocol/registry/pulls)** - Contribute work towards issues
+
+### Quick start:
+
+#### Pre-requisites
+
+- **Docker**
+- **Go 1.24.x** 
+- **golangci-lint v2.4.0**
+
+#### Running the server
+
+```bash
+# Start full development environment
+make dev-compose
+```
+
+This starts the registry at [`localhost:8080`](http://localhost:8080) with PostgreSQL and seed data. It can be configured with environment variables in [docker-compose.yml](./docker-compose.yml) - see [.env.example](./.env.example) for a reference.
+
+<details>
+<summary>Alternative: Local setup without Docker</summary>
+
+**Prerequisites:**
+- PostgreSQL running locally
+- Go 1.24.x installed
+
+```bash
+# Build and run locally
+make build
+make dev-local
+```
+
+The service runs on [`localhost:8080`](http://localhost:8080) by default. This can be configured with environment variables in `.env` - see [.env.example](./.env.example) for a reference.
+
+</details>
+
+<details>
+<summary>Alternative: Running a pre-built Docker image</summary>
+
+Pre-built Docker images are automatically published to GitHub Container Registry:
+
+```bash
+# Run latest stable release
+docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:latest
+
+# Run latest from main branch (continuous deployment)
+docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:main
+
+# Run specific release version
+docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:v1.0.0
+
+# Run development build from main branch
+docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:main-20250906-abc123d
+```
+
+**Available tags:** 
+- **Releases**: `latest`, `v1.0.0`, `v1.1.0`, etc.
+- **Continuous**: `main` (latest main branch build)
+- **Development**: `main-<date>-<sha>` (specific commit builds)
+
+</details>
+
+#### Publishing a server
+
+To publish a server, we've built a simple CLI. You can use it with:
+
+```bash
+# Build the latest CLI
+make publisher
+
+# Use it!
+./bin/mcp-publisher --help
+```
+
+See [the publisher guide](./docs/guides/publishing/publish-server.md) for more details.
+
+#### Other commands
+
+```bash
+# Run lint, unit tests and integration tests
+make check
+```
+
+There are also a few more helpful commands for development. Run `make help` to learn more, or look in [Makefile](./Makefile).
+
+<!--
+For Claude and other AI tools: Always prefer make targets over custom commands where possible.
+-->
+
+## Architecture
+
+### Project Structure
+
+```
+├── cmd/                     # Application entry points
+│   └── publisher/           # Server publishing tool
+├── data/                    # Seed data
+├── deploy/                  # Deployment configuration (Pulumi)
+├── docs/                    # Documentation
+├── internal/                # Private application code
+│   ├── api/                 # HTTP handlers and routing
+│   ├── auth/                # Authentication (GitHub OAuth, JWT, namespace blocking)
+│   ├── config/              # Configuration management
+│   ├── database/            # Data persistence (PostgreSQL, in-memory)
+│   ├── service/             # Business logic
+│   ├── telemetry/           # Metrics and monitoring
+│   └── validators/          # Input validation
+├── pkg/                     # Public packages
+│   ├── api/                 # API types and structures
+│   │   └── v0/              # Version 0 API types
+│   └── model/               # Data models for server.json
+├── scripts/                 # Development and testing scripts
+├── tests/                   # Integration tests
+└── tools/                   # CLI tools and utilities
+    └── validate-*.sh        # Schema validation tools
+```
+
+### Authentication
+
+Publishing supports multiple authentication methods:
+- **GitHub OAuth** - For publishing by logging into GitHub
+- **GitHub OIDC** - For publishing from GitHub Actions
+- **DNS verification** - For proving ownership of a domain and its subdomains
+- **HTTP verification** - For proving ownership of a domain
+
+The registry validates namespace ownership when publishing. E.g. to publish...:
+- `io.github.domdomegg/my-cool-mcp` you must login to GitHub as `domdomegg`, or be in a GitHub Action on domdomegg's repos
+- `me.adamjones/my-cool-mcp` you must prove ownership of `adamjones.me` via DNS or HTTP challenge
+
+## More documentation
+
+See the [documentation](./docs) for more details if your question has not been answered here!

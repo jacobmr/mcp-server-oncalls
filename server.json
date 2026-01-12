@@ -1,0 +1,51 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.jacobmr/mcp-server-oncalls",
+  "description": "MCP server for OnCalls physician on-call scheduling system. Query on-call schedules, view shifts, check requests, and look up physician contacts.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/jacobmr/mcp-server-oncalls",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registry_type": "npm",
+      "registry_base_url": "https://registry.npmjs.org",
+      "identifier": "mcp-server-oncalls",
+      "version": "1.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environment_variables": [
+        {
+          "name": "ONCALLS_USERNAME",
+          "description": "Your OnCalls login username",
+          "is_required": true,
+          "format": "string",
+          "is_secret": false
+        },
+        {
+          "name": "ONCALLS_PASSWORD",
+          "description": "Your OnCalls login password",
+          "is_required": true,
+          "format": "string",
+          "is_secret": true
+        },
+        {
+          "name": "ONCALLS_API_URL",
+          "description": "OnCalls API URL (e.g., https://oncalls.com/api)",
+          "is_required": true,
+          "format": "string",
+          "is_secret": false
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "transport_type": "sse",
+      "url": "https://mcp.oncalls.com/sse"
+    }
+  ]
+}
