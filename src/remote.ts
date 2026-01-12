@@ -14,23 +14,22 @@
 
 import { startRemoteServer } from './remote-server.js';
 
-// Validate required environment variables
-if (!process.env.ONCALLS_BASE_URL) {
-  console.error('Error: Missing required environment variable: ONCALLS_BASE_URL');
-  console.error('');
-  console.error('Example:');
-  console.error('  ONCALLS_BASE_URL=https://v3.oncalls.com/api PORT=3001 npm run start:remote');
-  process.exit(1);
-}
-
 const port = parseInt(process.env.PORT || '3001', 10);
 
-console.log('Starting OnCalls Remote MCP Server...');
-console.log(`  ONCALLS_BASE_URL: ${process.env.ONCALLS_BASE_URL}`);
+console.log('========================================');
+console.log('OnCalls Remote MCP Server Starting...');
+console.log('========================================');
 console.log(`  PORT: ${port}`);
+console.log(`  ONCALLS_BASE_URL: ${process.env.ONCALLS_BASE_URL || '(NOT SET)'}`);
 console.log('');
 
+// Warn but don't exit if ONCALLS_BASE_URL is missing - let healthcheck pass
+// Auth will fail at runtime if not set
+if (!process.env.ONCALLS_BASE_URL) {
+  console.warn('WARNING: ONCALLS_BASE_URL not set. Auth will fail until configured.');
+}
+
 startRemoteServer(port).catch((error) => {
-  console.error('Fatal error:', error);
+  console.error('Fatal error starting server:', error);
   process.exit(1);
 });
