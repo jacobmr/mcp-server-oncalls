@@ -4,13 +4,16 @@
   "description": "MCP server for OnCalls physician on-call scheduling system",
   "main": "dist/index.js",
   "bin": {
-    "mcp-server-oncalls": "dist/index.js"
+    "mcp-server-oncalls": "dist/index.js",
+    "mcp-server-oncalls-remote": "dist/remote.js"
   },
   "type": "module",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "tsup src/index.ts src/remote.ts --format esm --dts --clean",
     "dev": "tsup src/index.ts --format esm --watch",
+    "dev:remote": "tsup src/remote.ts --format esm --watch --onSuccess 'node dist/remote.js'",
     "start": "node dist/index.js",
+    "start:remote": "node dist/remote.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -39,13 +42,17 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^20.0.0",
-    "eslint": "^8.57.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
     "prettier": "^3.2.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",

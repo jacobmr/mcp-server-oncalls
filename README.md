@@ -107,11 +107,48 @@ Claude: You have 3 pending requests:
 3. Dr. Patel - Day Off - Jan 25
 ```
 
+## Remote Server Deployment
+
+For organizations that want a hosted MCP server (so users don't need to install locally):
+
+### Deploy to Railway
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template)
+
+1. Connect your GitHub repository
+2. Set environment variable: `ONCALLS_BASE_URL=https://your-oncalls-instance.com/api`
+3. Railway will automatically deploy
+
+### Docker
+
+```bash
+docker run -p 3001:3001 \
+  -e ONCALLS_BASE_URL=https://oncalls.com/api \
+  mcp-server-oncalls-remote
+```
+
+### Connect Claude to Remote Server
+
+Once deployed, users authenticate with their own OnCalls credentials via headers:
+
+```
+GET https://your-mcp-server.railway.app/sse
+Headers:
+  X-OnCalls-Username: user123
+  X-OnCalls-Password: password
+```
+
+Or via Bearer token (base64 encoded `username:password`):
+
+```
+Authorization: Bearer dXNlcjEyMzpwYXNzd29yZA==
+```
+
 ## Development
 
 ```bash
 # Clone the repository
-git clone https://github.com/jmirza/mcp-server-oncalls.git
+git clone https://github.com/jacobmr/mcp-server-oncalls.git
 cd mcp-server-oncalls
 
 # Install dependencies
@@ -119,6 +156,12 @@ npm install
 
 # Build
 npm run build
+
+# Run local server
+npm start
+
+# Run remote server
+ONCALLS_BASE_URL=https://v3.oncalls.com/api npm run start:remote
 
 # Run tests
 npm test
@@ -133,7 +176,7 @@ npm run dev
 # Build first
 npm run build
 
-# Run with inspector
+# Run with inspector (local mode)
 npx @modelcontextprotocol/inspector node dist/index.js
 ```
 
@@ -155,4 +198,4 @@ Contributions are welcome! Please open an issue or submit a pull request.
 ## Support
 
 - **OnCalls Support**: [oncalls.com/contact](https://oncalls.com/contact)
-- **MCP Issues**: [GitHub Issues](https://github.com/jmirza/mcp-server-oncalls/issues)
+- **MCP Issues**: [GitHub Issues](https://github.com/jacobmr/mcp-server-oncalls/issues)
