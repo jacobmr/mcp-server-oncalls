@@ -7,7 +7,9 @@ import { z } from 'zod';
 import type { OncallsClient } from '../../auth/index.js';
 
 export const getPhysicianContactSchema = z.object({
-  physicianName: z.string().describe('Name of the physician to look up (e.g., "Dr. Smith" or "Smith")'),
+  physicianName: z
+    .string()
+    .describe('Name of the physician to look up (e.g., "Dr. Smith" or "Smith")'),
 });
 
 export const getPhysicianContactDefinition = {
@@ -24,6 +26,10 @@ export const getPhysicianContactDefinition = {
       },
     },
     required: ['physicianName'],
+  },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
   },
 };
 

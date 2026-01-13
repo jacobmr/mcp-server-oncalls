@@ -18,6 +18,10 @@ export const getShiftTypesDefinition = {
     type: 'object' as const,
     properties: {},
   },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+  },
 };
 
 interface ShiftLegendItem {

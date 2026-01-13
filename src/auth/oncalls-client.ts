@@ -105,7 +105,9 @@ export class OncallsClient {
       viewReqs: data.data.viewReqs,
     };
 
-    console.error(`[OnCalls] Authenticated as ${this._userContext.firstName} ${this._userContext.lastName} (Group: ${this._userContext.groupId}, Admin: ${this._userContext.isAdmin})`);
+    console.error(
+      `[OnCalls] Authenticated as ${this._userContext.firstName} ${this._userContext.lastName} (Group: ${this._userContext.groupId}, Admin: ${this._userContext.isAdmin})`
+    );
   }
 
   /**

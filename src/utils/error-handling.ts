@@ -15,10 +15,16 @@ export function toMcpError(error: unknown): McpError {
   if (error instanceof Error) {
     // Check for specific error patterns
     if (error.message.includes('Authentication failed') || error.message.includes('401')) {
-      return new McpError(ErrorCode.InvalidRequest, 'Authentication failed. Check your OnCalls credentials.');
+      return new McpError(
+        ErrorCode.InvalidRequest,
+        'Authentication failed. Check your OnCalls credentials.'
+      );
     }
     if (error.message.includes('403') || error.message.includes('permission')) {
-      return new McpError(ErrorCode.InvalidRequest, 'Permission denied. You may not have access to this resource.');
+      return new McpError(
+        ErrorCode.InvalidRequest,
+        'Permission denied. You may not have access to this resource.'
+      );
     }
     if (error.message.includes('404') || error.message.includes('not found')) {
       return new McpError(ErrorCode.InvalidRequest, 'Resource not found.');

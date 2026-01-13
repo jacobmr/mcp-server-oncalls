@@ -5,10 +5,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { OncallsClient } from './auth/index.js';
 import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
@@ -54,7 +51,9 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // Handle tool listing
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = getToolsForUser(client.userContext.isAdmin);
-    console.error(`[${SERVER_NAME}] Listing ${tools.length} tools (admin: ${client.userContext.isAdmin})`);
+    console.error(
+      `[${SERVER_NAME}] Listing ${tools.length} tools (admin: ${client.userContext.isAdmin})`
+    );
 
     return {
       tools: tools.map((tool) => tool.definition),

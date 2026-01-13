@@ -14,12 +14,14 @@ Create an MCP (Model Context Protocol) server that allows Claude to interact wit
 ## ✅ COMPLETED
 
 ### 1. Core MCP Server (Local - stdio)
+
 - **Location:** `/Users/jmr/dev/mcp-server-oncalls/`
 - **Entry point:** `src/index.ts` → `dist/index.js`
 - **Transport:** stdio (for Claude Desktop local use)
 - **Published to npm:** https://www.npmjs.com/package/mcp-server-oncalls
 
 ### 2. Remote MCP Server (SSE)
+
 - **Entry point:** `src/remote.ts` → `dist/remote.js`
 - **Transport:** HTTP/SSE
 - **Deployed to Railway:** https://mcp.oncalls.com
@@ -45,12 +47,14 @@ Create an MCP (Model Context Protocol) server that allows Claude to interact wit
 | `list-pending-volunteers` | `src/tools/admin/list-pending-volunteers.ts` | Volunteers awaiting approval |
 
 ### 4. Authentication
+
 - **Current method:** Username/password via HTTP headers
 - **Headers:** `X-OnCalls-Username`, `X-OnCalls-Password`
 - **Alternative:** Bearer token (base64 encoded `username:password`)
 - **OnCalls API:** JWT-based, tokens managed in `src/auth/token-manager.ts`
 
 ### 5. Deployment
+
 - **Platform:** Railway
 - **Environment variable:** `ONCALLS_BASE_URL=https://v3.oncalls.com/api`
 - **Port:** 8080 (Railway default, server reads `process.env.PORT`)
@@ -88,30 +92,30 @@ Create an MCP (Model Context Protocol) server that allows Claude to interact wit
 
 ## 🔗 URLs & Resources
 
-| Resource | URL |
-|----------|-----|
-| **Remote MCP Server** | https://mcp.oncalls.com |
-| **Health Check** | https://mcp.oncalls.com/health |
-| **SSE Endpoint** | https://mcp.oncalls.com/sse |
-| **npm Package** | https://www.npmjs.com/package/mcp-server-oncalls |
-| **GitHub Repo** | https://github.com/jacobmr/mcp-server-oncalls |
-| **Railway Dashboard** | https://railway.app (project: mcp-server-oncalls) |
-| **OnCalls Staging API** | https://v3.oncalls.com/api |
-| **Anthropic Form** | https://docs.google.com/forms/d/e/1FAIpQLSeafJF2NDI7oYx1r8o0ycivCSVLNq92Mpc1FPxMKSw1CzDkqA/viewform |
+| Resource                | URL                                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| **Remote MCP Server**   | https://mcp.oncalls.com                                                                             |
+| **Health Check**        | https://mcp.oncalls.com/health                                                                      |
+| **SSE Endpoint**        | https://mcp.oncalls.com/sse                                                                         |
+| **npm Package**         | https://www.npmjs.com/package/mcp-server-oncalls                                                    |
+| **GitHub Repo**         | https://github.com/jacobmr/mcp-server-oncalls                                                       |
+| **Railway Dashboard**   | https://railway.app (project: mcp-server-oncalls)                                                   |
+| **OnCalls Staging API** | https://v3.oncalls.com/api                                                                          |
+| **Anthropic Form**      | https://docs.google.com/forms/d/e/1FAIpQLSeafJF2NDI7oYx1r8o0ycivCSVLNq92Mpc1FPxMKSw1CzDkqA/viewform |
 
 ---
 
 ## 🔑 Test Credentials
 
-| Field | Value |
-|-------|-------|
+| Field                   | Value                      |
+| ----------------------- | -------------------------- |
 | **OnCalls Staging URL** | https://v3.oncalls.com/api |
-| **Username** | Stetzer |
-| **Password** | 0900 |
-| **User** | Lee Stetzer |
-| **Group ID** | 46 |
-| **Group Name** | AMC Family Medicine |
-| **Is Admin** | Yes |
+| **Username**            | Stetzer                    |
+| **Password**            | 0900                       |
+| **User**                | Lee Stetzer                |
+| **Group ID**            | 46                         |
+| **Group Name**          | AMC Family Medicine        |
+| **Is Admin**            | Yes                        |
 
 ---
 
@@ -120,10 +124,12 @@ Create an MCP (Model Context Protocol) server that allows Claude to interact wit
 ### For Anthropic Directory Submission (Blockers)
 
 #### 1. OAuth 2.0 Implementation (MAJOR - 1-2 days)
+
 **Current:** Username/password headers
 **Required:** Full OAuth 2.0 flow
 
 **OnCalls Backend Changes Needed:**
+
 ```
 GET  /oauth/authorize    - Authorization page
 POST /oauth/token        - Token exchange
@@ -131,13 +137,16 @@ POST /oauth/token        - Token refresh (grant_type=refresh_token)
 ```
 
 **MCP Server Changes Needed:**
+
 - Add OAuth callback handler
 - Store/refresh OAuth tokens
 - Remove header-based auth
 - Update `src/remote-server.ts` auth middleware
 
 #### 2. Safety Annotations (Quick - 1 hour)
+
 Add to all tool definitions in `src/tools/`:
+
 ```typescript
 annotations: {
   readOnlyHint: true,
@@ -146,6 +155,7 @@ annotations: {
 ```
 
 Files to update:
+
 - `src/tools/queries/get-oncall-schedule.ts`
 - `src/tools/queries/get-my-schedule.ts`
 - `src/tools/queries/get-my-requests.ts`
@@ -156,16 +166,19 @@ Files to update:
 - `src/tools/admin/list-pending-volunteers.ts`
 
 #### 3. Privacy Policy
+
 - Create content for privacy policy
 - Publish at https://oncalls.com/privacy
 - Add URL to submission form
 
 #### 4. Terms of Service
+
 - Create content for TOS
 - Publish at https://oncalls.com/terms
 - Add URL to submission form
 
 #### 5. Logo
+
 - Create SVG logo (1:1 aspect ratio)
 - Host publicly
 - Add URL to submission form
@@ -173,6 +186,7 @@ Files to update:
 ### Optional Improvements
 
 #### Publish npm v1.1.0 with remote server
+
 ```bash
 cd /Users/jmr/dev/mcp-server-oncalls
 # Update version in package.json to 1.1.0
@@ -180,6 +194,7 @@ npm publish
 ```
 
 #### Community MCP Registry (Alternative to Anthropic)
+
 ```bash
 cd /Users/jmr/dev/mcp-server-oncalls
 ./mcp-publisher login github
@@ -191,17 +206,20 @@ cd /Users/jmr/dev/mcp-server-oncalls
 ## 🗺️ ROADMAP
 
 ### Phase 1: Quick Wins (Today)
+
 - [ ] Add safety annotations to all 8 tools
 - [ ] Expand README with troubleshooting guide
 - [ ] Publish npm v1.1.0
 
 ### Phase 2: Legal/Policy (This Week)
+
 - [ ] Draft privacy policy
 - [ ] Draft terms of service
 - [ ] Publish both on oncalls.com
 - [ ] Create logo SVG
 
 ### Phase 3: OAuth 2.0 (Next Sprint)
+
 - [ ] Design OAuth flow for OnCalls
 - [ ] Add `/oauth/authorize` endpoint to OnCalls Flask
 - [ ] Add `/oauth/token` endpoint to OnCalls Flask
@@ -210,6 +228,7 @@ cd /Users/jmr/dev/mcp-server-oncalls
 - [ ] Deploy updated MCP server
 
 ### Phase 4: Submission
+
 - [ ] Complete Anthropic form
 - [ ] Submit for review
 - [ ] Address any feedback

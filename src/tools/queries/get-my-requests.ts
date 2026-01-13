@@ -29,6 +29,10 @@ export const getMyRequestsDefinition = {
       },
     },
   },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+  },
 };
 
 // The get_all_requests API returns monthRequest array
@@ -62,9 +66,7 @@ export async function getMyRequests(
     end_date: '2030-12-31',
   });
 
-  let requests = (response.monthRequest || []).filter(
-    (r) => r.DocID === client.userContext.docId
-  );
+  let requests = (response.monthRequest || []).filter((r) => r.DocID === client.userContext.docId);
 
   // Filter by status if specified
   if (status === 'pending') {

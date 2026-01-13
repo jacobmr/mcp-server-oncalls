@@ -12,7 +12,8 @@ The MCP registry provides MCP clients with a list of MCP servers, like an app st
 **2025-09-04 update**: We're targeting a 'preview' go-live on 8th September. This may still be unstable and not provide durability guarantees, but is a step towards being more solidified. A general availability (GA) release will follow later.
 
 Current key maintainers:
-- **Adam Jones** (Anthropic) [@domdomegg](https://github.com/domdomegg)  
+
+- **Adam Jones** (Anthropic) [@domdomegg](https://github.com/domdomegg)
 - **Tadas Antanavicius** (PulseMCP) [@tadasant](https://github.com/tadasant)
 - **Toby Padilla** (GitHub) [@toby](https://github.com/toby)
 
@@ -24,7 +25,7 @@ Often (but not always) ideas flow through this pipeline:
 
 - **[Discord](https://modelcontextprotocol.io/community/communication)** - Real-time community discussions
 - **[Discussions](https://github.com/modelcontextprotocol/registry/discussions)** - Propose and discuss product/technical requirements
-- **[Issues](https://github.com/modelcontextprotocol/registry/issues)** - Track well-scoped technical work  
+- **[Issues](https://github.com/modelcontextprotocol/registry/issues)** - Track well-scoped technical work
 - **[Pull Requests](https://github.com/modelcontextprotocol/registry/pulls)** - Contribute work towards issues
 
 ### Quick start:
@@ -32,7 +33,7 @@ Often (but not always) ideas flow through this pipeline:
 #### Pre-requisites
 
 - **Docker**
-- **Go 1.24.x** 
+- **Go 1.24.x**
 - **golangci-lint v2.4.0**
 
 #### Running the server
@@ -48,6 +49,7 @@ This starts the registry at [`localhost:8080`](http://localhost:8080) with Postg
 <summary>Alternative: Local setup without Docker</summary>
 
 **Prerequisites:**
+
 - PostgreSQL running locally
 - Go 1.24.x installed
 
@@ -80,7 +82,8 @@ docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:v1.0.0
 docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:main-20250906-abc123d
 ```
 
-**Available tags:** 
+**Available tags:**
+
 - **Releases**: `latest`, `v1.0.0`, `v1.1.0`, etc.
 - **Continuous**: `main` (latest main branch build)
 - **Development**: `main-<date>-<sha>` (specific commit builds)
@@ -145,12 +148,14 @@ For Claude and other AI tools: Always prefer make targets over custom commands w
 ### Authentication
 
 Publishing supports multiple authentication methods:
+
 - **GitHub OAuth** - For publishing by logging into GitHub
 - **GitHub OIDC** - For publishing from GitHub Actions
 - **DNS verification** - For proving ownership of a domain and its subdomains
 - **HTTP verification** - For proving ownership of a domain
 
 The registry validates namespace ownership when publishing. E.g. to publish...:
+
 - `io.github.domdomegg/my-cool-mcp` you must login to GitHub as `domdomegg`, or be in a GitHub Action on domdomegg's repos
 - `me.adamjones/my-cool-mcp` you must prove ownership of `adamjones.me` via DNS or HTTP challenge
 

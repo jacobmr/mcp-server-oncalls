@@ -19,6 +19,10 @@ export const listPendingVolunteersDefinition = {
     type: 'object' as const,
     properties: {},
   },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+  },
 };
 
 interface VolunteerItem {

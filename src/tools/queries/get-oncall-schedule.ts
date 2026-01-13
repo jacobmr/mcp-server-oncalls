@@ -27,9 +27,14 @@ export const getOncallScheduleDefinition = {
       },
       shiftType: {
         type: 'string',
-        description: 'Optional: Filter results to a specific shift type (e.g., "OB-GYN", "Night Shift")',
+        description:
+          'Optional: Filter results to a specific shift type (e.g., "OB-GYN", "Night Shift")',
       },
     },
+  },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
   },
 };
 

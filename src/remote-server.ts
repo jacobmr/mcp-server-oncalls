@@ -7,10 +7,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { OncallsClient } from './auth/index.js';
 import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
@@ -45,7 +42,9 @@ function createMcpServer(client: OncallsClient): Server {
   // Handle tool listing
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = getToolsForUser(client.userContext.isAdmin);
-    console.log(`[${SERVER_NAME}] Listing ${tools.length} tools (admin: ${client.userContext.isAdmin})`);
+    console.log(
+      `[${SERVER_NAME}] Listing ${tools.length} tools (admin: ${client.userContext.isAdmin})`
+    );
 
     return {
       tools: tools.map((tool) => tool.definition),
@@ -177,17 +176,14 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
   const app = express();
 
   // CORS configuration - allow Claude to connect
-  app.use(cors({
-    origin: true, // Allow all origins for MCP
-    credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-OnCalls-Username',
-      'X-OnCalls-Password',
-    ],
-  }));
+  app.use(
+    cors({
+      origin: true, // Allow all origins for MCP
+      credentials: true,
+      methods: ['GET', 'POST', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-OnCalls-Username', 'X-OnCalls-Password'],
+    })
+  );
 
   app.use(express.json());
 

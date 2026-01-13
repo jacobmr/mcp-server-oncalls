@@ -8,8 +8,14 @@ import type { OncallsClient } from '../../auth/index.js';
 import { startOfMonth, endOfMonth } from '../../utils/index.js';
 
 export const getMyScheduleSchema = z.object({
-  startDate: z.string().optional().describe('Start date in YYYY-MM-DD format. Defaults to start of current month.'),
-  endDate: z.string().optional().describe('End date in YYYY-MM-DD format. Defaults to end of current month.'),
+  startDate: z
+    .string()
+    .optional()
+    .describe('Start date in YYYY-MM-DD format. Defaults to start of current month.'),
+  endDate: z
+    .string()
+    .optional()
+    .describe('End date in YYYY-MM-DD format. Defaults to end of current month.'),
 });
 
 export const getMyScheduleDefinition = {
@@ -30,6 +36,10 @@ export const getMyScheduleDefinition = {
         description: 'End date in YYYY-MM-DD format. Defaults to end of current month.',
       },
     },
+  },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
   },
 };
 
@@ -112,9 +122,7 @@ export async function getMySchedule(
       const assignedNames = extractNames(shift.lnameFull || shift.lname || {});
 
       // Check if current user is assigned to this shift
-      const isAssigned = assignedNames.some((name) =>
-        name.toLowerCase().includes(userLastName)
-      );
+      const isAssigned = assignedNames.some((name) => name.toLowerCase().includes(userLastName));
 
       if (isAssigned) {
         myShifts.push({

@@ -30,6 +30,10 @@ export const listMembersDefinition = {
       },
     },
   },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+  },
 };
 
 interface MembersResponse {
@@ -37,10 +41,7 @@ interface MembersResponse {
   data?: Member[];
 }
 
-export async function listMembers(
-  client: OncallsClient,
-  args: z.infer<typeof listMembersSchema>
-) {
+export async function listMembers(client: OncallsClient, args: z.infer<typeof listMembersSchema>) {
   // Check admin permission
   if (!client.userContext.isAdmin) {
     throw new McpError(

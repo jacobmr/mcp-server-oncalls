@@ -10,8 +10,4 @@ export {
   listPendingVolunteersDefinition,
 } from './list-pending-volunteers.js';
 
-export {
-  listMembers,
-  listMembersSchema,
-  listMembersDefinition,
-} from './list-members.js';
+export { listMembers, listMembersSchema, listMembersDefinition } from './list-members.js';

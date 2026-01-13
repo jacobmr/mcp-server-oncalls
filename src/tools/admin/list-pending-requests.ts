@@ -26,6 +26,10 @@ export const listPendingRequestsDefinition = {
       },
     },
   },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+  },
 };
 
 // The get_all_requests endpoint returns monthRequest array
@@ -69,15 +73,11 @@ export async function listPendingRequests(
   });
 
   // Filter to pending requests (not approved and not rejected)
-  let requests = (response.monthRequest || []).filter(
-    (r) => !r.IsApproved && !r.isrejected
-  );
+  let requests = (response.monthRequest || []).filter((r) => !r.IsApproved && !r.isrejected);
 
   // Filter by type if specified
   if (requestType) {
-    requests = requests.filter((r) =>
-      r.req_type.toLowerCase().includes(requestType.toLowerCase())
-    );
+    requests = requests.filter((r) => r.req_type.toLowerCase().includes(requestType.toLowerCase()));
   }
 
   const formattedRequests = requests.map((r) => ({
