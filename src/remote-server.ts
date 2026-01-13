@@ -1,10 +1,12 @@
 /**
  * OnCalls Remote MCP Server
  * HTTP/SSE transport for remote deployment
+ * Supports OAuth 2.0 authentication
  */
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -13,14 +15,45 @@ import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
 
 const SERVER_NAME = 'oncalls-remote';
-const SERVER_VERSION = '1.1.0';
+const SERVER_VERSION = '1.2.0';
+
+// OAuth Configuration
+const OAUTH_CONFIG = {
+  clientId: process.env.MCP_OAUTH_CLIENT_ID || 'mcp-server-oncalls',
+  clientSecret: process.env.MCP_OAUTH_CLIENT_SECRET || '',
+  authorizeUrl: process.env.MCP_OAUTH_AUTHORIZE_URL || 'https://v3.oncalls.com/oauth/authorize',
+  tokenUrl: process.env.MCP_OAUTH_TOKEN_URL || 'https://v3.oncalls.com/oauth/token',
+  redirectUri: process.env.MCP_OAUTH_REDIRECT_URI || 'https://mcp.oncalls.com/oauth/callback',
+  scopes: 'read:schedule read:members read:requests read:profile admin:requests admin:members',
+};
 
 // Store active transports by session ID
 const activeTransports = new Map<string, SSEServerTransport>();
 
+// Store OAuth states for CSRF protection (expire after 10 minutes)
+const oauthStates = new Map<string, { createdAt: number; redirectAfterAuth?: string }>();
+
+// Clean up expired states periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, data] of oauthStates.entries()) {
+    if (now - data.createdAt > 10 * 60 * 1000) {
+      oauthStates.delete(state);
+    }
+  }
+}, 60 * 1000);
+
 interface AuthenticatedRequest extends Request {
   oncallsClient?: OncallsClient;
   sessionId?: string;
+}
+
+interface OAuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  refresh_token: string;
+  scope: string;
 }
 
 /**
@@ -87,9 +120,10 @@ function createMcpServer(client: OncallsClient): Server {
 
 /**
  * Authentication middleware
- * Expects either:
- * - X-OnCalls-Username and X-OnCalls-Password headers
- * - Or Authorization: Bearer <base64(username:password)>
+ * Supports:
+ * 1. OAuth 2.0 Bearer token (JWT from OnCalls OAuth)
+ * 2. Legacy: X-OnCalls-Username and X-OnCalls-Password headers
+ * 3. Legacy: Bearer <base64(username:password)>
  */
 async function authMiddleware(
   req: AuthenticatedRequest,
@@ -103,63 +137,131 @@ async function authMiddleware(
       return;
     }
 
-    let username: string | undefined;
-    let password: string | undefined;
+    const authHeader = req.headers.authorization;
 
-    // Method 1: Custom headers
+    // Method 1: OAuth 2.0 Bearer token (check if it's a JWT)
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7);
+
+      // Check if it looks like a JWT (three base64 segments separated by dots)
+      if (token.split('.').length === 3) {
+        try {
+          // Try OAuth authentication
+          const client = await OncallsClient.fromOAuthTokens({
+            baseUrl,
+            accessToken: token,
+            refreshToken: '', // Will be populated if refresh is needed
+            clientId: OAUTH_CONFIG.clientId,
+            clientSecret: OAUTH_CONFIG.clientSecret,
+            tokenUrl: OAUTH_CONFIG.tokenUrl,
+          });
+
+          req.sessionId = `oauth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          req.oncallsClient = client;
+
+          console.log(
+            `[${SERVER_NAME}] OAuth authenticated: ${client.userContext.email} (session: ${req.sessionId})`
+          );
+          next();
+          return;
+        } catch (oauthError) {
+          console.error(`[${SERVER_NAME}] OAuth auth failed, trying legacy auth:`, oauthError);
+          // Fall through to try legacy auth
+        }
+      }
+
+      // Try legacy base64(username:password) bearer token
+      try {
+        const decoded = Buffer.from(token, 'base64').toString('utf-8');
+        const [username, password] = decoded.split(':');
+        if (username && password) {
+          const client = new OncallsClient({ baseUrl, username, password });
+          await client.authenticate();
+
+          req.sessionId = `${username}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          req.oncallsClient = client;
+
+          console.log(
+            `[${SERVER_NAME}] Legacy auth (bearer): ${username} (session: ${req.sessionId})`
+          );
+          next();
+          return;
+        }
+      } catch {
+        // Invalid base64 or auth failed
+      }
+    }
+
+    // Method 2: Custom headers (legacy)
     const headerUsername = req.headers['x-oncalls-username'] as string;
     const headerPassword = req.headers['x-oncalls-password'] as string;
 
     if (headerUsername && headerPassword) {
-      username = headerUsername;
-      password = headerPassword;
-    }
-
-    // Method 2: Bearer token (base64 encoded username:password)
-    const authHeader = req.headers.authorization;
-    if (!username && authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.slice(7);
-      try {
-        const decoded = Buffer.from(token, 'base64').toString('utf-8');
-        const [user, pass] = decoded.split(':');
-        if (user && pass) {
-          username = user;
-          password = pass;
-        }
-      } catch {
-        // Invalid base64, ignore
-      }
-    }
-
-    // Method 3: Query params (for SSE connections where headers may be limited)
-    if (!username && req.query.username && req.query.password) {
-      username = req.query.username as string;
-      password = req.query.password as string;
-    }
-
-    if (!username || !password) {
-      res.status(401).json({
-        error: 'Authentication required',
-        hint: 'Provide X-OnCalls-Username and X-OnCalls-Password headers, or Bearer token',
+      const client = new OncallsClient({
+        baseUrl,
+        username: headerUsername,
+        password: headerPassword,
       });
+      await client.authenticate();
+
+      req.sessionId = `${headerUsername}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      req.oncallsClient = client;
+
+      console.log(
+        `[${SERVER_NAME}] Legacy auth (headers): ${headerUsername} (session: ${req.sessionId})`
+      );
+      next();
       return;
     }
 
-    // Create and authenticate OnCalls client
-    const client = new OncallsClient({
-      baseUrl,
-      username,
-      password,
+    // Method 3: Query params (for SSE connections where headers may be limited)
+    if (req.query.username && req.query.password) {
+      const username = req.query.username as string;
+      const password = req.query.password as string;
+
+      const client = new OncallsClient({ baseUrl, username, password });
+      await client.authenticate();
+
+      req.sessionId = `${username}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      req.oncallsClient = client;
+
+      console.log(`[${SERVER_NAME}] Legacy auth (query): ${username} (session: ${req.sessionId})`);
+      next();
+      return;
+    }
+
+    // Method 4: OAuth access_token query param
+    if (req.query.access_token) {
+      const token = req.query.access_token as string;
+      try {
+        const client = await OncallsClient.fromOAuthTokens({
+          baseUrl,
+          accessToken: token,
+          refreshToken: '',
+          clientId: OAUTH_CONFIG.clientId,
+          clientSecret: OAUTH_CONFIG.clientSecret,
+          tokenUrl: OAUTH_CONFIG.tokenUrl,
+        });
+
+        req.sessionId = `oauth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        req.oncallsClient = client;
+
+        console.log(
+          `[${SERVER_NAME}] OAuth authenticated (query): ${client.userContext.email} (session: ${req.sessionId})`
+        );
+        next();
+        return;
+      } catch (error) {
+        console.error(`[${SERVER_NAME}] OAuth query auth failed:`, error);
+      }
+    }
+
+    // No valid authentication found
+    res.status(401).json({
+      error: 'Authentication required',
+      hint: 'Use OAuth 2.0 Bearer token, or legacy X-OnCalls-Username/X-OnCalls-Password headers',
+      oauth_start_url: '/oauth/start',
     });
-
-    await client.authenticate();
-
-    // Generate session ID
-    req.sessionId = `${username}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    req.oncallsClient = client;
-
-    console.log(`[${SERVER_NAME}] Authenticated user: ${username} (session: ${req.sessionId})`);
-    next();
   } catch (error) {
     console.error(`[${SERVER_NAME}] Auth error:`, error);
     res.status(401).json({
@@ -186,6 +288,7 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
   );
 
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 
   // Health check endpoint
   app.get('/health', (_req, res) => {
@@ -195,6 +298,181 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
       version: SERVER_VERSION,
     });
   });
+
+  // ==================== OAuth 2.0 Endpoints ====================
+
+  /**
+   * Start OAuth flow - returns authorization URL
+   */
+  app.get('/oauth/start', (req, res) => {
+    // Generate CSRF state
+    const state = crypto.randomBytes(32).toString('hex');
+    oauthStates.set(state, {
+      createdAt: Date.now(),
+      redirectAfterAuth: req.query.redirect as string | undefined,
+    });
+
+    // Build authorization URL
+    const params = new URLSearchParams({
+      client_id: OAUTH_CONFIG.clientId,
+      redirect_uri: OAUTH_CONFIG.redirectUri,
+      response_type: 'code',
+      scope: OAUTH_CONFIG.scopes,
+      state,
+    });
+
+    const authUrl = `${OAUTH_CONFIG.authorizeUrl}?${params.toString()}`;
+
+    res.json({
+      auth_url: authUrl,
+      state,
+      message: 'Redirect the user to auth_url to begin OAuth flow',
+    });
+  });
+
+  /**
+   * OAuth callback - exchanges code for tokens
+   */
+  app.get('/oauth/callback', async (req, res) => {
+    const { code, state, error, error_description } = req.query;
+
+    // Handle OAuth errors
+    if (error) {
+      console.error(`[${SERVER_NAME}] OAuth error: ${error} - ${error_description}`);
+      res.status(400).json({
+        error: error as string,
+        error_description: error_description as string,
+      });
+      return;
+    }
+
+    // Validate state for CSRF protection
+    if (!state || !oauthStates.has(state as string)) {
+      res.status(400).json({
+        error: 'invalid_state',
+        error_description: 'Invalid or expired state parameter',
+      });
+      return;
+    }
+
+    const stateData = oauthStates.get(state as string)!;
+    oauthStates.delete(state as string);
+
+    if (!code) {
+      res.status(400).json({
+        error: 'missing_code',
+        error_description: 'Authorization code is required',
+      });
+      return;
+    }
+
+    try {
+      // Exchange code for tokens
+      const tokenResponse = await fetch(OAUTH_CONFIG.tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: code as string,
+          redirect_uri: OAUTH_CONFIG.redirectUri,
+          client_id: OAUTH_CONFIG.clientId,
+          client_secret: OAUTH_CONFIG.clientSecret,
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        const errorData = await tokenResponse.text();
+        console.error(`[${SERVER_NAME}] Token exchange failed:`, errorData);
+        res.status(400).json({
+          error: 'token_exchange_failed',
+          error_description: 'Failed to exchange authorization code for tokens',
+        });
+        return;
+      }
+
+      const tokens = (await tokenResponse.json()) as OAuthTokenResponse;
+
+      console.log(`[${SERVER_NAME}] OAuth token exchange successful`);
+
+      // Return tokens to the client
+      res.json({
+        success: true,
+        access_token: tokens.access_token,
+        token_type: tokens.token_type,
+        expires_in: tokens.expires_in,
+        refresh_token: tokens.refresh_token,
+        scope: tokens.scope,
+        message: 'Use the access_token as Bearer token for API requests',
+      });
+    } catch (error) {
+      console.error(`[${SERVER_NAME}] OAuth callback error:`, error);
+      res.status(500).json({
+        error: 'server_error',
+        error_description: 'Failed to complete OAuth flow',
+      });
+    }
+  });
+
+  /**
+   * Token refresh endpoint
+   */
+  app.post('/oauth/refresh', async (req, res) => {
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) {
+      res.status(400).json({
+        error: 'missing_refresh_token',
+        error_description: 'refresh_token is required',
+      });
+      return;
+    }
+
+    try {
+      const tokenResponse = await fetch(OAUTH_CONFIG.tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token,
+          client_id: OAUTH_CONFIG.clientId,
+          client_secret: OAUTH_CONFIG.clientSecret,
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        const errorData = await tokenResponse.text();
+        console.error(`[${SERVER_NAME}] Token refresh failed:`, errorData);
+        res.status(400).json({
+          error: 'refresh_failed',
+          error_description: 'Failed to refresh token',
+        });
+        return;
+      }
+
+      const tokens = (await tokenResponse.json()) as OAuthTokenResponse;
+
+      res.json({
+        success: true,
+        access_token: tokens.access_token,
+        token_type: tokens.token_type,
+        expires_in: tokens.expires_in,
+        refresh_token: tokens.refresh_token || refresh_token,
+        scope: tokens.scope,
+      });
+    } catch (error) {
+      console.error(`[${SERVER_NAME}] Token refresh error:`, error);
+      res.status(500).json({
+        error: 'server_error',
+        error_description: 'Failed to refresh token',
+      });
+    }
+  });
+
+  // ==================== MCP Endpoints ====================
 
   // SSE endpoint for MCP connections
   app.get('/sse', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -251,11 +529,19 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
         sse: '/sse',
         message: '/message',
         health: '/health',
+        oauth: {
+          start: '/oauth/start',
+          callback: '/oauth/callback',
+          refresh: '/oauth/refresh',
+        },
       },
       auth: {
-        method: 'Headers or Bearer token',
-        headers: ['X-OnCalls-Username', 'X-OnCalls-Password'],
-        bearer: 'Base64 encoded username:password',
+        recommended: 'OAuth 2.0',
+        oauth_start_url: '/oauth/start',
+        legacy: {
+          headers: ['X-OnCalls-Username', 'X-OnCalls-Password'],
+          bearer: 'Base64 encoded username:password',
+        },
       },
     });
   });
@@ -265,6 +551,7 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
     console.log(`[${SERVER_NAME}] Remote MCP server running on port ${port}`);
     console.log(`[${SERVER_NAME}] Health check: http://localhost:${port}/health`);
     console.log(`[${SERVER_NAME}] SSE endpoint: http://localhost:${port}/sse`);
+    console.log(`[${SERVER_NAME}] OAuth start: http://localhost:${port}/oauth/start`);
   });
 }
 
