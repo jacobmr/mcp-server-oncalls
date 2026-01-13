@@ -313,6 +313,14 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
     });
   });
 
+  // Favicon - redirect to V3 stethoscope icon (prevents fallback to old V2 icon)
+  app.get('/favicon.ico', (_req, res) => {
+    res.redirect(301, 'https://v3.oncalls.com/stethoscope-favicon.png');
+  });
+  app.get('/favicon.png', (_req, res) => {
+    res.redirect(301, 'https://v3.oncalls.com/stethoscope-favicon.png');
+  });
+
   // ==================== OAuth Discovery Endpoints ====================
 
   /**
