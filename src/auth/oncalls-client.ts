@@ -36,14 +36,82 @@ export interface OncallsClientConfig {
   password: string;
 }
 
+export interface OAuthClientConfig {
+  baseUrl: string;
+  accessToken: string;
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  tokenUrl: string;
+}
+
+interface OAuthUserInfoResponse {
+  sub: string;
+  name: string;
+  given_name: string;
+  family_name: string;
+  email: string;
+  email_verified: boolean;
+  group_id: number;
+  is_admin: boolean;
+}
+
 export class OncallsClient {
   private readonly config: OncallsClientConfig;
   private readonly tokenManager: TokenManager;
   private _userContext: UserContext | null = null;
+  private oauthConfig: OAuthClientConfig | null = null;
 
   constructor(config: OncallsClientConfig) {
     this.config = config;
     this.tokenManager = new TokenManager();
+  }
+
+  /**
+   * Create an OncallsClient from OAuth tokens
+   * Used when authenticating via OAuth 2.0 flow
+   */
+  static async fromOAuthTokens(oauthConfig: OAuthClientConfig): Promise<OncallsClient> {
+    // Create a dummy config (won't be used for auth)
+    const client = new OncallsClient({
+      baseUrl: oauthConfig.baseUrl,
+      username: '',
+      password: '',
+    });
+
+    client.oauthConfig = oauthConfig;
+    client.tokenManager.setTokens(oauthConfig.accessToken, oauthConfig.refreshToken);
+
+    // Fetch user info from OAuth userinfo endpoint
+    const userInfoUrl = oauthConfig.baseUrl.replace('/api', '') + '/oauth/userinfo';
+    const response = await fetch(userInfoUrl, {
+      headers: {
+        Authorization: `Bearer ${oauthConfig.accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get user info: ${response.status}`);
+    }
+
+    const userInfo = (await response.json()) as OAuthUserInfoResponse;
+
+    client._userContext = {
+      docId: parseInt(userInfo.sub, 10),
+      groupId: userInfo.group_id,
+      username: userInfo.email,
+      firstName: userInfo.given_name,
+      lastName: userInfo.family_name,
+      email: userInfo.email,
+      isAdmin: userInfo.is_admin,
+      viewReqs: userInfo.is_admin, // Admins can view requests
+    };
+
+    console.error(
+      `[OnCalls OAuth] Authenticated as ${client._userContext.firstName} ${client._userContext.lastName} (Group: ${client._userContext.groupId}, Admin: ${client._userContext.isAdmin})`
+    );
+
+    return client;
   }
 
   /**
@@ -115,6 +183,9 @@ export class OncallsClient {
    */
   async ensureAuthenticated(): Promise<void> {
     if (!this.tokenManager.hasTokens()) {
+      if (this.oauthConfig) {
+        throw new Error('OAuth session expired. Please re-authenticate.');
+      }
       await this.authenticate();
       return;
     }
@@ -130,7 +201,16 @@ export class OncallsClient {
   private async refreshToken(): Promise<void> {
     const refreshToken = this.tokenManager.getRefreshToken();
     if (!refreshToken) {
+      if (this.oauthConfig) {
+        throw new Error('OAuth session expired. Please re-authenticate.');
+      }
       await this.authenticate();
+      return;
+    }
+
+    // Use OAuth refresh if configured
+    if (this.oauthConfig) {
+      await this.refreshOAuthToken();
       return;
     }
 
@@ -164,6 +244,56 @@ export class OncallsClient {
       // Refresh failed, re-authenticate
       console.error('[OnCalls] Token refresh error, re-authenticating');
       await this.authenticate();
+    }
+  }
+
+  /**
+   * Refresh OAuth access token using refresh_token grant
+   */
+  private async refreshOAuthToken(): Promise<void> {
+    if (!this.oauthConfig) {
+      throw new Error('OAuth not configured');
+    }
+
+    const refreshToken = this.tokenManager.getRefreshToken();
+    if (!refreshToken) {
+      throw new Error('No refresh token available');
+    }
+
+    try {
+      const response = await fetch(this.oauthConfig.tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          client_id: this.oauthConfig.clientId,
+          client_secret: this.oauthConfig.clientSecret,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`OAuth refresh failed: ${error}`);
+      }
+
+      const data = (await response.json()) as {
+        access_token: string;
+        refresh_token?: string;
+        expires_in?: number;
+      };
+
+      this.tokenManager.updateAccessToken(data.access_token);
+      if (data.refresh_token) {
+        this.tokenManager.setTokens(data.access_token, data.refresh_token);
+      }
+
+      console.error('[OnCalls OAuth] Token refreshed successfully');
+    } catch (error) {
+      console.error('[OnCalls OAuth] Token refresh failed:', error);
+      throw new Error('OAuth session expired. Please re-authenticate.');
     }
   }
 

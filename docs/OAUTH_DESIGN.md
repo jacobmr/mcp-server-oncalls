@@ -58,6 +58,7 @@ This document outlines the OAuth 2.0 implementation required for Anthropic MCP D
 ### New Endpoints Required
 
 #### 1. `GET /oauth/authorize`
+
 Authorization page where users log in and approve access.
 
 **Query Parameters:**
@@ -70,12 +71,14 @@ Authorization page where users log in and approve access.
 | `state` | Yes | CSRF protection token |
 
 **Behavior:**
+
 1. Show login form if user not logged in
 2. Show approval screen with requested scopes
 3. On approval, redirect to `redirect_uri` with `code` and `state`
 4. On denial, redirect with `error=access_denied`
 
 **Example Request:**
+
 ```
 GET https://v3.oncalls.com/oauth/authorize?
   client_id=mcp-server-oncalls&
@@ -86,6 +89,7 @@ GET https://v3.oncalls.com/oauth/authorize?
 ```
 
 **Success Redirect:**
+
 ```
 https://mcp.oncalls.com/oauth/callback?
   code=AUTH_CODE_HERE&
@@ -93,9 +97,11 @@ https://mcp.oncalls.com/oauth/callback?
 ```
 
 #### 2. `POST /oauth/token`
+
 Token exchange and refresh endpoint.
 
 **For Authorization Code Exchange:**
+
 ```json
 {
   "grant_type": "authorization_code",
@@ -107,6 +113,7 @@ Token exchange and refresh endpoint.
 ```
 
 **Response:**
+
 ```json
 {
   "access_token": "eyJ...",
@@ -118,6 +125,7 @@ Token exchange and refresh endpoint.
 ```
 
 **For Token Refresh:**
+
 ```json
 {
   "grant_type": "refresh_token",
@@ -128,9 +136,11 @@ Token exchange and refresh endpoint.
 ```
 
 #### 3. `GET /oauth/userinfo` (Optional but recommended)
+
 Returns user info for the authenticated token.
 
 **Response:**
+
 ```json
 {
   "sub": "123",
@@ -144,6 +154,7 @@ Returns user info for the authenticated token.
 ### Database Changes
 
 New table: `oauth_clients`
+
 ```sql
 CREATE TABLE oauth_clients (
   id SERIAL PRIMARY KEY,
@@ -158,6 +169,7 @@ CREATE TABLE oauth_clients (
 ```
 
 New table: `oauth_authorization_codes`
+
 ```sql
 CREATE TABLE oauth_authorization_codes (
   id SERIAL PRIMARY KEY,
@@ -173,13 +185,13 @@ CREATE TABLE oauth_authorization_codes (
 
 ### Scopes
 
-| Scope | Description |
-|-------|-------------|
-| `read:schedule` | View on-call schedules |
-| `read:members` | View group member info |
-| `read:requests` | View shift requests |
+| Scope            | Description                     |
+| ---------------- | ------------------------------- |
+| `read:schedule`  | View on-call schedules          |
+| `read:members`   | View group member info          |
+| `read:requests`  | View shift requests             |
 | `admin:requests` | Manage pending requests (admin) |
-| `admin:members` | Manage group members (admin) |
+| `admin:members`  | Manage group members (admin)    |
 
 ---
 
@@ -188,6 +200,7 @@ CREATE TABLE oauth_authorization_codes (
 ### New Endpoints
 
 #### `GET /oauth/callback`
+
 Receives the authorization code from OnCalls.
 
 ```typescript
@@ -212,6 +225,7 @@ app.get('/oauth/callback', async (req, res) => {
 ```
 
 #### `GET /oauth/start`
+
 Initiates OAuth flow, returns auth URL.
 
 ```typescript
@@ -223,7 +237,7 @@ app.get('/oauth/start', (req, res) => {
     clientId: process.env.OAUTH_CLIENT_ID,
     redirectUri: `${process.env.SERVER_URL}/oauth/callback`,
     scope: 'read:schedule read:members read:requests',
-    state
+    state,
   });
 
   res.json({ authUrl, state });
@@ -305,6 +319,7 @@ const authMiddleware = async (req, res, next) => {
 ## Part 3: Implementation Plan
 
 ### Phase 1: OnCalls Backend (1 day)
+
 1. [ ] Create `oauth_clients` table
 2. [ ] Create `oauth_authorization_codes` table
 3. [ ] Implement `GET /oauth/authorize` endpoint
@@ -313,6 +328,7 @@ const authMiddleware = async (req, res, next) => {
 6. [ ] Test OAuth flow manually
 
 ### Phase 2: MCP Server Updates (0.5 day)
+
 1. [ ] Add `/oauth/start` endpoint
 2. [ ] Add `/oauth/callback` endpoint
 3. [ ] Update `OncallsClient` for OAuth tokens
@@ -321,6 +337,7 @@ const authMiddleware = async (req, res, next) => {
 6. [ ] Remove old header-based auth
 
 ### Phase 3: Testing & Deployment (0.5 day)
+
 1. [ ] Test full OAuth flow end-to-end
 2. [ ] Test token refresh
 3. [ ] Test error cases
