@@ -322,8 +322,10 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
    *
    * Per RFC 9728: authorization_servers is an array of issuer URLs (strings)
    * Client fetches auth server metadata from each issuer's /.well-known/oauth-authorization-server
+   *
+   * Note: Also handle /sse suffix as some clients append the resource path
    */
-  app.get('/.well-known/oauth-protected-resource', (_req, res) => {
+  const protectedResourceHandler = (_req: Request, res: Response) => {
     const resourceUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
     const authServerIssuer = OAUTH_CONFIG.authorizeUrl.replace('/oauth/authorize', '');
 
@@ -333,7 +335,10 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
       scopes_supported: OAUTH_CONFIG.scopes.split(' '),
       bearer_methods_supported: ['header'],
     });
-  });
+  };
+
+  app.get('/.well-known/oauth-protected-resource', protectedResourceHandler);
+  app.get('/.well-known/oauth-protected-resource/sse', protectedResourceHandler);
 
   /**
    * Authorization Server Metadata (RFC 8414)
@@ -557,7 +562,7 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
     await mcpServer.connect(transport);
   });
 
-  // Message endpoint for MCP messages
+  // Message endpoint for MCP messages (also handle POST to /sse as some clients use that)
   app.post('/message', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     const sessionId = req.sessionId!;
     const transport = activeTransports.get(sessionId);
@@ -568,6 +573,24 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
       const client = req.oncallsClient!;
       const mcpServer = createMcpServer(client);
       const tempTransport = new SSEServerTransport('/message', res);
+
+      await mcpServer.connect(tempTransport);
+      await tempTransport.handlePostMessage(req, res);
+      return;
+    }
+
+    await transport.handlePostMessage(req, res);
+  });
+
+  // Also handle POST to /sse (some clients send messages there instead of /message)
+  app.post('/sse', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    const sessionId = req.sessionId!;
+    const transport = activeTransports.get(sessionId);
+
+    if (!transport) {
+      const client = req.oncallsClient!;
+      const mcpServer = createMcpServer(client);
+      const tempTransport = new SSEServerTransport('/sse', res);
 
       await mcpServer.connect(tempTransport);
       await tempTransport.handlePostMessage(req, res);
