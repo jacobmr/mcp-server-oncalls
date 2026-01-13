@@ -15,7 +15,7 @@ import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
 
 const SERVER_NAME = 'oncalls-remote';
-const SERVER_VERSION = '1.5.0';
+const SERVER_VERSION = '1.6.0';
 
 // OAuth Configuration
 const OAUTH_CONFIG = {
@@ -548,21 +548,27 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
   // Client discovers OAuth via resource_metadata URL in the header
   app.get('/sse', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     const client = req.oncallsClient!;
-    const sessionId = req.sessionId!;
+    const userSessionId = req.sessionId!;
 
-    console.log(`[${SERVER_NAME}] New SSE connection: ${sessionId}`);
+    console.log(`[${SERVER_NAME}] New SSE connection for user session: ${userSessionId}`);
 
     // Create MCP server for this client
     const mcpServer = createMcpServer(client);
 
-    // Create SSE transport
+    // Create SSE transport - it generates its own sessionId internally
     const transport = new SSEServerTransport('/message', res);
-    activeTransports.set(sessionId, transport);
+
+    // Access the transport's internal sessionId so we can key our Map correctly
+    // The SDK exposes this via a property
+    const transportSessionId = (transport as unknown as { sessionId: string }).sessionId;
+    console.log(`[${SERVER_NAME}] Transport sessionId: ${transportSessionId}`);
+
+    activeTransports.set(transportSessionId, transport);
 
     // Clean up on disconnect
     res.on('close', () => {
-      console.log(`[${SERVER_NAME}] SSE connection closed: ${sessionId}`);
-      activeTransports.delete(sessionId);
+      console.log(`[${SERVER_NAME}] SSE connection closed: ${transportSessionId}`);
+      activeTransports.delete(transportSessionId);
       mcpServer.close().catch(console.error);
     });
 
@@ -571,32 +577,46 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
   });
 
   // Message endpoint for MCP messages
-  // The transport includes a session ID in the endpoint event that clients use
+  // SSEServerTransport sends the client a URL with ?sessionId=xxx, client POSTs to that URL
   app.post('/message', async (req: Request, res: Response) => {
-    // Find transport by checking all active transports
-    // The session ID is embedded in the POST URL path by SSEServerTransport
-    for (const [_sessionId, transport] of activeTransports) {
-      try {
-        await transport.handlePostMessage(req, res);
-        return;
-      } catch {
-        // Try next transport
-      }
+    const sessionId = req.query.sessionId as string;
+
+    if (!sessionId) {
+      console.log(`[${SERVER_NAME}] POST /message missing sessionId`);
+      res.status(400).json({ error: 'Missing sessionId parameter' });
+      return;
     }
-    res.status(404).json({ error: 'No active session found' });
+
+    const transport = activeTransports.get(sessionId);
+    if (!transport) {
+      console.log(`[${SERVER_NAME}] POST /message unknown sessionId: ${sessionId}`);
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    console.log(`[${SERVER_NAME}] POST /message for session: ${sessionId}`);
+    await transport.handlePostMessage(req, res);
   });
 
-  // Also handle POST to /sse (some clients send messages there)
+  // Also handle POST to /sse (some clients send messages there instead of /message)
   app.post('/sse', async (req: Request, res: Response) => {
-    for (const [_sessionId, transport] of activeTransports) {
-      try {
-        await transport.handlePostMessage(req, res);
-        return;
-      } catch {
-        // Try next transport
-      }
+    const sessionId = req.query.sessionId as string;
+
+    if (!sessionId) {
+      console.log(`[${SERVER_NAME}] POST /sse missing sessionId`);
+      res.status(400).json({ error: 'Missing sessionId parameter' });
+      return;
     }
-    res.status(404).json({ error: 'No active session found' });
+
+    const transport = activeTransports.get(sessionId);
+    if (!transport) {
+      console.log(`[${SERVER_NAME}] POST /sse unknown sessionId: ${sessionId}`);
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    console.log(`[${SERVER_NAME}] POST /sse for session: ${sessionId}`);
+    await transport.handlePostMessage(req, res);
   });
 
   // Info endpoint
