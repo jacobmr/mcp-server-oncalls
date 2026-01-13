@@ -570,42 +570,33 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
     await mcpServer.connect(transport);
   });
 
-  // Message endpoint for MCP messages (also handle POST to /sse as some clients use that)
-  app.post('/message', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    const sessionId = req.sessionId!;
-    const transport = activeTransports.get(sessionId);
-
-    if (!transport) {
-      // No existing transport - this might be a new connection
-      // Create a temporary server for this request
-      const client = req.oncallsClient!;
-      const mcpServer = createMcpServer(client);
-      const tempTransport = new SSEServerTransport('/message', res);
-
-      await mcpServer.connect(tempTransport);
-      await tempTransport.handlePostMessage(req, res);
-      return;
+  // Message endpoint for MCP messages
+  // The transport includes a session ID in the endpoint event that clients use
+  app.post('/message', async (req: Request, res: Response) => {
+    // Find transport by checking all active transports
+    // The session ID is embedded in the POST URL path by SSEServerTransport
+    for (const [_sessionId, transport] of activeTransports) {
+      try {
+        await transport.handlePostMessage(req, res);
+        return;
+      } catch {
+        // Try next transport
+      }
     }
-
-    await transport.handlePostMessage(req, res);
+    res.status(404).json({ error: 'No active session found' });
   });
 
-  // Also handle POST to /sse (some clients send messages there instead of /message)
-  app.post('/sse', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    const sessionId = req.sessionId!;
-    const transport = activeTransports.get(sessionId);
-
-    if (!transport) {
-      const client = req.oncallsClient!;
-      const mcpServer = createMcpServer(client);
-      const tempTransport = new SSEServerTransport('/sse', res);
-
-      await mcpServer.connect(tempTransport);
-      await tempTransport.handlePostMessage(req, res);
-      return;
+  // Also handle POST to /sse (some clients send messages there)
+  app.post('/sse', async (req: Request, res: Response) => {
+    for (const [_sessionId, transport] of activeTransports) {
+      try {
+        await transport.handlePostMessage(req, res);
+        return;
+      } catch {
+        // Try next transport
+      }
     }
-
-    await transport.handlePostMessage(req, res);
+    res.status(404).json({ error: 'No active session found' });
   });
 
   // Info endpoint
