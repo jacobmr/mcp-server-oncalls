@@ -319,6 +319,9 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
    * OAuth Protected Resource Metadata (RFC 9728)
    * This is the primary discovery endpoint per MCP spec
    * Clients discover this via WWW-Authenticate header's resource_metadata parameter
+   *
+   * Per RFC 9728: authorization_servers is an array of issuer URLs (strings)
+   * Client fetches auth server metadata from each issuer's /.well-known/oauth-authorization-server
    */
   app.get('/.well-known/oauth-protected-resource', (_req, res) => {
     const resourceUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
@@ -326,14 +329,7 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
 
     res.json({
       resource: resourceUrl,
-      authorization_servers: [
-        {
-          issuer: authServerIssuer,
-          authorization_endpoint: OAUTH_CONFIG.authorizeUrl,
-          token_endpoint: OAUTH_CONFIG.tokenUrl,
-          scopes_supported: OAUTH_CONFIG.scopes.split(' '),
-        },
-      ],
+      authorization_servers: [authServerIssuer],
       scopes_supported: OAUTH_CONFIG.scopes.split(' '),
       bearer_methods_supported: ['header'],
     });
