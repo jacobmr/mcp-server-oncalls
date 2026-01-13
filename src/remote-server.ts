@@ -15,7 +15,7 @@ import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
 
 const SERVER_NAME = 'oncalls-remote';
-const SERVER_VERSION = '1.4.0';
+const SERVER_VERSION = '1.5.0';
 
 // OAuth Configuration
 const OAUTH_CONFIG = {
@@ -256,34 +256,28 @@ async function authMiddleware(
       }
     }
 
-    // No valid authentication found - return 401 with proper OAuth headers
+    // No valid authentication found - return 401 with MCP spec-compliant headers
+    // Per MCP spec: WWW-Authenticate header must include resource_metadata URL
     const serverUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
     res.setHeader(
       'WWW-Authenticate',
-      `Bearer realm="${serverUrl}", ` +
-        `authorization_uri="${OAUTH_CONFIG.authorizeUrl}", ` +
-        `token_uri="${OAUTH_CONFIG.tokenUrl}", ` +
+      `Bearer resource_metadata="${serverUrl}/.well-known/oauth-protected-resource", ` +
         `scope="${OAUTH_CONFIG.scopes}"`
     );
     res.status(401).json({
       error: 'unauthorized',
-      error_description: 'Authentication required',
-      oauth: {
-        authorization_endpoint: OAUTH_CONFIG.authorizeUrl,
-        token_endpoint: OAUTH_CONFIG.tokenUrl,
-        client_id: OAUTH_CONFIG.clientId,
-        scopes: OAUTH_CONFIG.scopes.split(' '),
-      },
-      discovery: {
-        oauth_authorization_server: `${serverUrl}/.well-known/oauth-authorization-server`,
-        oauth_protected_resource: `${serverUrl}/.well-known/oauth-protected-resource`,
-        mcp_metadata: `${serverUrl}/.well-known/mcp.json`,
-      },
+      error_description:
+        'Authentication required. Discover OAuth configuration at resource_metadata URL.',
     });
   } catch (error) {
     console.error(`[${SERVER_NAME}] Auth error:`, error);
     const serverUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
-    res.setHeader('WWW-Authenticate', `Bearer realm="${serverUrl}", error="invalid_token"`);
+    res.setHeader(
+      'WWW-Authenticate',
+      `Bearer resource_metadata="${serverUrl}/.well-known/oauth-protected-resource", ` +
+        `error="invalid_token", ` +
+        `error_description="${error instanceof Error ? error.message : 'Authentication failed'}"`
+    );
     res.status(401).json({
       error: 'invalid_token',
       error_description: error instanceof Error ? error.message : 'Authentication failed',
@@ -322,60 +316,46 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
   // ==================== OAuth Discovery Endpoints ====================
 
   /**
-   * OAuth 2.0 Authorization Server Metadata (RFC 8414)
-   * Claude Desktop uses this to discover OAuth endpoints
+   * OAuth Protected Resource Metadata (RFC 9728)
+   * This is the primary discovery endpoint per MCP spec
+   * Clients discover this via WWW-Authenticate header's resource_metadata parameter
+   */
+  app.get('/.well-known/oauth-protected-resource', (_req, res) => {
+    const resourceUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
+    const authServerIssuer = OAUTH_CONFIG.authorizeUrl.replace('/oauth/authorize', '');
+
+    res.json({
+      resource: resourceUrl,
+      authorization_servers: [
+        {
+          issuer: authServerIssuer,
+          authorization_endpoint: OAUTH_CONFIG.authorizeUrl,
+          token_endpoint: OAUTH_CONFIG.tokenUrl,
+          scopes_supported: OAUTH_CONFIG.scopes.split(' '),
+        },
+      ],
+      scopes_supported: OAUTH_CONFIG.scopes.split(' '),
+      bearer_methods_supported: ['header'],
+    });
+  });
+
+  /**
+   * Authorization Server Metadata (RFC 8414)
+   * This should be served by the auth server (v3.oncalls.com), but we proxy it for convenience
    */
   app.get('/.well-known/oauth-authorization-server', (_req, res) => {
-    const baseUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
+    const authServerIssuer = OAUTH_CONFIG.authorizeUrl.replace('/oauth/authorize', '');
+
     res.json({
-      issuer: OAUTH_CONFIG.authorizeUrl.replace('/oauth/authorize', ''),
+      issuer: authServerIssuer,
       authorization_endpoint: OAUTH_CONFIG.authorizeUrl,
       token_endpoint: OAUTH_CONFIG.tokenUrl,
-      registration_endpoint: undefined, // Dynamic registration not supported
       scopes_supported: OAUTH_CONFIG.scopes.split(' '),
       response_types_supported: ['code'],
       response_modes_supported: ['query'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
-      token_endpoint_auth_methods_supported: ['client_secret_post'],
-      code_challenge_methods_supported: ['S256'], // PKCE support
-    });
-  });
-
-  /**
-   * OAuth Protected Resource Metadata (RFC 9728)
-   * Tells clients how to authenticate with this resource server
-   */
-  app.get('/.well-known/oauth-protected-resource', (_req, res) => {
-    const baseUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
-    res.json({
-      resource: baseUrl,
-      authorization_servers: [OAUTH_CONFIG.authorizeUrl.replace('/oauth/authorize', '')],
-      scopes_supported: OAUTH_CONFIG.scopes.split(' '),
-      bearer_methods_supported: ['header', 'query'],
-    });
-  });
-
-  /**
-   * MCP Server Metadata
-   * Provides MCP-specific information including auth requirements
-   */
-  app.get('/.well-known/mcp.json', (_req, res) => {
-    const baseUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
-    res.json({
-      name: SERVER_NAME,
-      version: SERVER_VERSION,
-      description: 'OnCalls MCP Server for physician on-call scheduling',
-      endpoints: {
-        sse: `${baseUrl}/sse`,
-        message: `${baseUrl}/message`,
-      },
-      authentication: {
-        type: 'oauth2',
-        oauth_authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
-        oauth_protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
-        client_id: OAUTH_CONFIG.clientId,
-        scopes: OAUTH_CONFIG.scopes.split(' '),
-      },
+      token_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
+      code_challenge_methods_supported: ['S256'],
     });
   });
 
@@ -555,135 +535,12 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
   // ==================== MCP Endpoints ====================
 
   // SSE endpoint for MCP connections
-  // Handles auth inline - starts SSE stream, sends auth event if needed
-  app.get('/sse', async (req: AuthenticatedRequest, res: Response) => {
-    const serverUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
-    const baseUrl = process.env.ONCALLS_BASE_URL;
+  // Per MCP spec: returns 401 with WWW-Authenticate header if not authenticated
+  // Client discovers OAuth via resource_metadata URL in the header
+  app.get('/sse', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    const client = req.oncallsClient!;
+    const sessionId = req.sessionId!;
 
-    // Try to authenticate the request
-    let client: OncallsClient | null = null;
-    let sessionId: string | null = null;
-
-    try {
-      // Try OAuth Bearer token
-      const authHeader = req.headers.authorization;
-      if (authHeader?.startsWith('Bearer ')) {
-        const token = authHeader.slice(7);
-        if (token.split('.').length === 3 && baseUrl) {
-          client = await OncallsClient.fromOAuthTokens({
-            baseUrl,
-            accessToken: token,
-            refreshToken: '',
-            clientId: OAUTH_CONFIG.clientId,
-            clientSecret: OAUTH_CONFIG.clientSecret,
-            tokenUrl: OAUTH_CONFIG.tokenUrl,
-          });
-          sessionId = `oauth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        }
-      }
-
-      // Try query param token
-      if (!client && req.query.access_token && baseUrl) {
-        const token = req.query.access_token as string;
-        client = await OncallsClient.fromOAuthTokens({
-          baseUrl,
-          accessToken: token,
-          refreshToken: '',
-          clientId: OAUTH_CONFIG.clientId,
-          clientSecret: OAUTH_CONFIG.clientSecret,
-          tokenUrl: OAUTH_CONFIG.tokenUrl,
-        });
-        sessionId = `oauth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      }
-
-      // Try legacy header auth
-      if (!client && baseUrl) {
-        const headerUsername = req.headers['x-oncalls-username'] as string;
-        const headerPassword = req.headers['x-oncalls-password'] as string;
-        if (headerUsername && headerPassword) {
-          client = new OncallsClient({
-            baseUrl,
-            username: headerUsername,
-            password: headerPassword,
-          });
-          await client.authenticate();
-          sessionId = `${headerUsername}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        }
-      }
-
-      // Try legacy query auth
-      if (!client && baseUrl && req.query.username && req.query.password) {
-        const username = req.query.username as string;
-        const password = req.query.password as string;
-        client = new OncallsClient({ baseUrl, username, password });
-        await client.authenticate();
-        sessionId = `${username}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      }
-    } catch (error) {
-      console.error(`[${SERVER_NAME}] Auth attempt failed:`, error);
-    }
-
-    // If no auth, start SSE and send auth_required event
-    if (!client) {
-      console.log(`[${SERVER_NAME}] No auth - sending auth_required SSE event`);
-
-      // Set SSE headers
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.flushHeaders();
-
-      // Generate state for OAuth
-      const state = crypto.randomBytes(32).toString('hex');
-      oauthStates.set(state, { createdAt: Date.now() });
-
-      // Build auth URL
-      const params = new URLSearchParams({
-        client_id: OAUTH_CONFIG.clientId,
-        redirect_uri: OAUTH_CONFIG.redirectUri,
-        response_type: 'code',
-        scope: OAUTH_CONFIG.scopes,
-        state,
-      });
-      const authUrl = `${OAUTH_CONFIG.authorizeUrl}?${params.toString()}`;
-
-      // Send auth_required event
-      const authEvent = {
-        type: 'auth_required',
-        data: {
-          method: 'oauth2',
-          auth_url: authUrl,
-          authorization_endpoint: OAUTH_CONFIG.authorizeUrl,
-          token_endpoint: OAUTH_CONFIG.tokenUrl,
-          client_id: OAUTH_CONFIG.clientId,
-          scopes: OAUTH_CONFIG.scopes.split(' '),
-          state,
-          discovery: {
-            oauth_authorization_server: `${serverUrl}/.well-known/oauth-authorization-server`,
-            mcp_metadata: `${serverUrl}/.well-known/mcp.json`,
-          },
-        },
-      };
-
-      res.write(`event: auth_required\n`);
-      res.write(`data: ${JSON.stringify(authEvent)}\n\n`);
-
-      // Keep connection open for a bit in case client handles it
-      setTimeout(() => {
-        res.write(`event: ping\n`);
-        res.write(`data: {}\n\n`);
-      }, 5000);
-
-      // Close after 30 seconds if no reconnect with auth
-      setTimeout(() => {
-        res.end();
-      }, 30000);
-
-      return;
-    }
-
-    // Authenticated - proceed with normal MCP connection
     console.log(`[${SERVER_NAME}] New SSE connection: ${sessionId}`);
 
     // Create MCP server for this client
@@ -691,12 +548,12 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
 
     // Create SSE transport
     const transport = new SSEServerTransport('/message', res);
-    activeTransports.set(sessionId!, transport);
+    activeTransports.set(sessionId, transport);
 
     // Clean up on disconnect
     res.on('close', () => {
       console.log(`[${SERVER_NAME}] SSE connection closed: ${sessionId}`);
-      activeTransports.delete(sessionId!);
+      activeTransports.delete(sessionId);
       mcpServer.close().catch(console.error);
     });
 
