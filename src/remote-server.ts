@@ -7,15 +7,21 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  isInitializeRequest,
+} from '@modelcontextprotocol/sdk/types.js';
 import { OncallsClient } from './auth/index.js';
 import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
 
 const SERVER_NAME = 'oncalls-remote';
-const SERVER_VERSION = '1.6.0';
+const SERVER_VERSION = '1.7.0';
 
 // OAuth Configuration
 const OAUTH_CONFIG = {
@@ -27,8 +33,12 @@ const OAUTH_CONFIG = {
   scopes: 'read:schedule read:members read:requests read:profile admin:requests admin:members',
 };
 
-// Store active transports by session ID
-const activeTransports = new Map<string, SSEServerTransport>();
+// Store active transports by session ID (both SSE and Streamable HTTP)
+type TransportType = SSEServerTransport | StreamableHTTPServerTransport;
+const activeTransports = new Map<string, TransportType>();
+
+// Store authenticated clients by session ID (for Streamable HTTP which may need client across requests)
+const authenticatedClients = new Map<string, OncallsClient>();
 
 // Store OAuth states for CSRF protection (expire after 10 minutes)
 const oauthStates = new Map<string, { createdAt: number; redirectAfterAuth?: string }>();
@@ -543,9 +553,110 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
 
   // ==================== MCP Endpoints ====================
 
-  // SSE endpoint for MCP connections
-  // Per MCP spec: returns 401 with WWW-Authenticate header if not authenticated
-  // Client discovers OAuth via resource_metadata URL in the header
+  /**
+   * Streamable HTTP Transport endpoint (Protocol version 2025-11-25)
+   * This is the preferred transport for newer clients like mcp-remote
+   * Supports GET, POST, DELETE on a single endpoint
+   */
+  app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    console.log(`[${SERVER_NAME}] Received ${req.method} request to /mcp`);
+
+    try {
+      const client = req.oncallsClient!;
+
+      // Check for existing session ID in header
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      let transport: StreamableHTTPServerTransport | undefined;
+
+      if (sessionId && activeTransports.has(sessionId)) {
+        // Check if the transport is of the correct type
+        const existingTransport = activeTransports.get(sessionId);
+        if (existingTransport instanceof StreamableHTTPServerTransport) {
+          transport = existingTransport;
+        } else {
+          // Transport exists but is not a StreamableHTTPServerTransport
+          res.status(400).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32000,
+              message: 'Bad Request: Session exists but uses a different transport protocol',
+            },
+            id: null,
+          });
+          return;
+        }
+      } else if (!sessionId && req.method === 'POST' && isInitializeRequest(req.body)) {
+        // New session initialization
+        console.log(`[${SERVER_NAME}] Creating new Streamable HTTP session`);
+
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (newSessionId: string) => {
+            console.log(`[${SERVER_NAME}] Streamable HTTP session initialized: ${newSessionId}`);
+            activeTransports.set(newSessionId, transport!);
+            authenticatedClients.set(newSessionId, client);
+          },
+        });
+
+        // Set up cleanup handler
+        transport.onclose = () => {
+          const sid = transport!.sessionId;
+          if (sid) {
+            console.log(`[${SERVER_NAME}] Streamable HTTP session closed: ${sid}`);
+            activeTransports.delete(sid);
+            authenticatedClients.delete(sid);
+          }
+        };
+
+        // Create and connect MCP server
+        const mcpServer = createMcpServer(client);
+        await mcpServer.connect(transport);
+      } else if (sessionId) {
+        // Session ID provided but not found
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: 'Session not found',
+          },
+          id: null,
+        });
+        return;
+      } else {
+        // No session ID and not an initialization request
+        res.status(400).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: 'Bad Request: No valid session ID provided or not an initialization request',
+          },
+          id: null,
+        });
+        return;
+      }
+
+      // Handle the request with the transport
+      await transport.handleRequest(req, res, req.body);
+    } catch (error) {
+      console.error(`[${SERVER_NAME}] Error handling /mcp request:`, error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal server error',
+          },
+          id: null,
+        });
+      }
+    }
+  });
+
+  /**
+   * SSE Transport endpoint (Protocol version 2024-11-05 - deprecated but still supported)
+   * Per MCP spec: returns 401 with WWW-Authenticate header if not authenticated
+   * Client discovers OAuth via resource_metadata URL in the header
+   */
   app.get('/sse', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     const client = req.oncallsClient!;
     const userSessionId = req.sessionId!;
@@ -576,7 +687,7 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
     await mcpServer.connect(transport);
   });
 
-  // Message endpoint for MCP messages
+  // Message endpoint for SSE transport MCP messages
   // SSEServerTransport sends the client a URL with ?sessionId=xxx, client POSTs to that URL
   app.post('/message', async (req: Request, res: Response) => {
     const sessionId = req.query.sessionId as string;
@@ -594,8 +705,15 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
       return;
     }
 
+    // Only SSEServerTransport uses /message endpoint
+    if (!(transport instanceof SSEServerTransport)) {
+      console.log(`[${SERVER_NAME}] POST /message: wrong transport type for session ${sessionId}`);
+      res.status(400).json({ error: 'Session uses different transport protocol' });
+      return;
+    }
+
     console.log(`[${SERVER_NAME}] POST /message for session: ${sessionId}`);
-    await transport.handlePostMessage(req, res);
+    await transport.handlePostMessage(req, res, req.body);
   });
 
   // Also handle POST to /sse (some clients send messages there instead of /message)
@@ -615,8 +733,15 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
       return;
     }
 
+    // Only SSEServerTransport uses /sse POST endpoint
+    if (!(transport instanceof SSEServerTransport)) {
+      console.log(`[${SERVER_NAME}] POST /sse: wrong transport type for session ${sessionId}`);
+      res.status(400).json({ error: 'Session uses different transport protocol' });
+      return;
+    }
+
     console.log(`[${SERVER_NAME}] POST /sse for session: ${sessionId}`);
-    await transport.handlePostMessage(req, res);
+    await transport.handlePostMessage(req, res, req.body);
   });
 
   // Info endpoint
@@ -626,13 +751,26 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
       version: SERVER_VERSION,
       description: 'OnCalls MCP Server - Remote',
       endpoints: {
-        sse: '/sse',
-        message: '/message',
+        mcp: '/mcp (Streamable HTTP - recommended)',
+        sse: '/sse (SSE - deprecated)',
+        message: '/message (for SSE transport)',
         health: '/health',
         oauth: {
           start: '/oauth/start',
           callback: '/oauth/callback',
           refresh: '/oauth/refresh',
+        },
+      },
+      transports: {
+        streamableHttp: {
+          description: 'Streamable HTTP transport (Protocol version 2025-11-25)',
+          endpoint: '/mcp',
+          methods: ['GET', 'POST', 'DELETE'],
+        },
+        sse: {
+          description: 'SSE transport (Protocol version 2024-11-05 - deprecated)',
+          sseEndpoint: '/sse',
+          messageEndpoint: '/message',
         },
       },
       auth: {
@@ -648,10 +786,10 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
 
   // Start server
   app.listen(port, () => {
-    console.log(`[${SERVER_NAME}] Remote MCP server running on port ${port}`);
+    console.log(`[${SERVER_NAME}] Remote MCP server v${SERVER_VERSION} running on port ${port}`);
+    console.log(`[${SERVER_NAME}] Streamable HTTP endpoint: http://localhost:${port}/mcp`);
+    console.log(`[${SERVER_NAME}] SSE endpoint (deprecated): http://localhost:${port}/sse`);
     console.log(`[${SERVER_NAME}] Health check: http://localhost:${port}/health`);
-    console.log(`[${SERVER_NAME}] SSE endpoint: http://localhost:${port}/sse`);
-    console.log(`[${SERVER_NAME}] OAuth start: http://localhost:${port}/oauth/start`);
   });
 }
 
