@@ -11,7 +11,7 @@ import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
 
 const SERVER_NAME = 'oncalls';
-const SERVER_VERSION = '1.2.0';
+const SERVER_VERSION = '1.3.0';
 
 export interface ServerConfig {
   oncallsApiUrl: string;

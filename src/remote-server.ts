@@ -15,7 +15,7 @@ import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
 
 const SERVER_NAME = 'oncalls-remote';
-const SERVER_VERSION = '1.2.0';
+const SERVER_VERSION = '1.3.0';
 
 // OAuth Configuration
 const OAUTH_CONFIG = {
@@ -256,17 +256,37 @@ async function authMiddleware(
       }
     }
 
-    // No valid authentication found
+    // No valid authentication found - return 401 with proper OAuth headers
+    const serverUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
+    res.setHeader(
+      'WWW-Authenticate',
+      `Bearer realm="${serverUrl}", ` +
+        `authorization_uri="${OAUTH_CONFIG.authorizeUrl}", ` +
+        `token_uri="${OAUTH_CONFIG.tokenUrl}", ` +
+        `scope="${OAUTH_CONFIG.scopes}"`
+    );
     res.status(401).json({
-      error: 'Authentication required',
-      hint: 'Use OAuth 2.0 Bearer token, or legacy X-OnCalls-Username/X-OnCalls-Password headers',
-      oauth_start_url: '/oauth/start',
+      error: 'unauthorized',
+      error_description: 'Authentication required',
+      oauth: {
+        authorization_endpoint: OAUTH_CONFIG.authorizeUrl,
+        token_endpoint: OAUTH_CONFIG.tokenUrl,
+        client_id: OAUTH_CONFIG.clientId,
+        scopes: OAUTH_CONFIG.scopes.split(' '),
+      },
+      discovery: {
+        oauth_authorization_server: `${serverUrl}/.well-known/oauth-authorization-server`,
+        oauth_protected_resource: `${serverUrl}/.well-known/oauth-protected-resource`,
+        mcp_metadata: `${serverUrl}/.well-known/mcp.json`,
+      },
     });
   } catch (error) {
     console.error(`[${SERVER_NAME}] Auth error:`, error);
+    const serverUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
+    res.setHeader('WWW-Authenticate', `Bearer realm="${serverUrl}", error="invalid_token"`);
     res.status(401).json({
-      error: 'Authentication failed',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      error: 'invalid_token',
+      error_description: error instanceof Error ? error.message : 'Authentication failed',
     });
   }
 }
@@ -296,6 +316,66 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
       status: 'ok',
       server: SERVER_NAME,
       version: SERVER_VERSION,
+    });
+  });
+
+  // ==================== OAuth Discovery Endpoints ====================
+
+  /**
+   * OAuth 2.0 Authorization Server Metadata (RFC 8414)
+   * Claude Desktop uses this to discover OAuth endpoints
+   */
+  app.get('/.well-known/oauth-authorization-server', (_req, res) => {
+    const baseUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
+    res.json({
+      issuer: OAUTH_CONFIG.authorizeUrl.replace('/oauth/authorize', ''),
+      authorization_endpoint: OAUTH_CONFIG.authorizeUrl,
+      token_endpoint: OAUTH_CONFIG.tokenUrl,
+      registration_endpoint: undefined, // Dynamic registration not supported
+      scopes_supported: OAUTH_CONFIG.scopes.split(' '),
+      response_types_supported: ['code'],
+      response_modes_supported: ['query'],
+      grant_types_supported: ['authorization_code', 'refresh_token'],
+      token_endpoint_auth_methods_supported: ['client_secret_post'],
+      code_challenge_methods_supported: ['S256'], // PKCE support
+    });
+  });
+
+  /**
+   * OAuth Protected Resource Metadata (RFC 9728)
+   * Tells clients how to authenticate with this resource server
+   */
+  app.get('/.well-known/oauth-protected-resource', (_req, res) => {
+    const baseUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
+    res.json({
+      resource: baseUrl,
+      authorization_servers: [OAUTH_CONFIG.authorizeUrl.replace('/oauth/authorize', '')],
+      scopes_supported: OAUTH_CONFIG.scopes.split(' '),
+      bearer_methods_supported: ['header', 'query'],
+    });
+  });
+
+  /**
+   * MCP Server Metadata
+   * Provides MCP-specific information including auth requirements
+   */
+  app.get('/.well-known/mcp.json', (_req, res) => {
+    const baseUrl = process.env.MCP_SERVER_URL || 'https://mcp.oncalls.com';
+    res.json({
+      name: SERVER_NAME,
+      version: SERVER_VERSION,
+      description: 'OnCalls MCP Server for physician on-call scheduling',
+      endpoints: {
+        sse: `${baseUrl}/sse`,
+        message: `${baseUrl}/message`,
+      },
+      authentication: {
+        type: 'oauth2',
+        oauth_authorization_server: `${baseUrl}/.well-known/oauth-authorization-server`,
+        oauth_protected_resource: `${baseUrl}/.well-known/oauth-protected-resource`,
+        client_id: OAUTH_CONFIG.clientId,
+        scopes: OAUTH_CONFIG.scopes.split(' '),
+      },
     });
   });
 

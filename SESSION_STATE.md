@@ -132,7 +132,9 @@ Create an MCP (Model Context Protocol) server that allows Claude to interact wit
 ## ✅ RECENTLY COMPLETED
 
 ### 1. Safety Annotations (v1.1.0)
+
 All 8 tools now have safety annotations:
+
 ```typescript
 annotations: {
   readOnlyHint: true,
@@ -141,6 +143,7 @@ annotations: {
 ```
 
 ### 2. OAuth 2.0 Implementation (v1.2.0)
+
 - V3 backend: OAuth Authorization Server implemented (endpoints, database tables)
 - MCP server: OAuth flow fully integrated
 - OAuth endpoints: `/oauth/start`, `/oauth/callback`, `/oauth/refresh`
