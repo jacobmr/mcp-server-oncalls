@@ -1,7 +1,7 @@
 # MCP Server OnCalls - Session State & Roadmap
 
-**Last Updated:** 2026-01-12
-**Session Summary:** Built and deployed MCP server for OnCalls physician scheduling system
+**Last Updated:** 2026-01-13
+**Session Summary:** Built MCP server with OAuth 2.0 for OnCalls physician scheduling
 
 ---
 
@@ -48,10 +48,20 @@ Create an MCP (Model Context Protocol) server that allows Claude to interact wit
 
 ### 4. Authentication
 
-- **Current method:** Username/password via HTTP headers
+- **Primary method:** OAuth 2.0 Authorization Code flow
+- **OAuth Endpoints:**
+  - `GET /oauth/start` - Initiates OAuth flow, returns auth URL
+  - `GET /oauth/callback` - Handles OAuth callback with auth code
+  - `POST /oauth/refresh` - Refreshes access token
+- **Legacy method:** Username/password via HTTP headers (still supported)
 - **Headers:** `X-OnCalls-Username`, `X-OnCalls-Password`
-- **Alternative:** Bearer token (base64 encoded `username:password`)
 - **OnCalls API:** JWT-based, tokens managed in `src/auth/token-manager.ts`
+- **OAuth Config (Railway env vars):**
+  - `MCP_OAUTH_CLIENT_ID=mcp-server-oncalls`
+  - `MCP_OAUTH_CLIENT_SECRET=<secret>`
+  - `MCP_OAUTH_AUTHORIZE_URL=https://v3.oncalls.com/oauth/authorize`
+  - `MCP_OAUTH_TOKEN_URL=https://v3.oncalls.com/oauth/token`
+  - `MCP_OAUTH_REDIRECT_URI=https://mcp.oncalls.com/oauth/callback`
 
 ### 5. Deployment
 
@@ -119,34 +129,10 @@ Create an MCP (Model Context Protocol) server that allows Claude to interact wit
 
 ---
 
-## 🚧 REMAINING WORK
+## ✅ RECENTLY COMPLETED
 
-### For Anthropic Directory Submission (Blockers)
-
-#### 1. OAuth 2.0 Implementation (MAJOR - 1-2 days)
-
-**Current:** Username/password headers
-**Required:** Full OAuth 2.0 flow
-
-**OnCalls Backend Changes Needed:**
-
-```
-GET  /oauth/authorize    - Authorization page
-POST /oauth/token        - Token exchange
-POST /oauth/token        - Token refresh (grant_type=refresh_token)
-```
-
-**MCP Server Changes Needed:**
-
-- Add OAuth callback handler
-- Store/refresh OAuth tokens
-- Remove header-based auth
-- Update `src/remote-server.ts` auth middleware
-
-#### 2. Safety Annotations (Quick - 1 hour)
-
-Add to all tool definitions in `src/tools/`:
-
+### 1. Safety Annotations (v1.1.0)
+All 8 tools now have safety annotations:
 ```typescript
 annotations: {
   readOnlyHint: true,
@@ -154,18 +140,21 @@ annotations: {
 }
 ```
 
-Files to update:
+### 2. OAuth 2.0 Implementation (v1.2.0)
+- V3 backend: OAuth Authorization Server implemented (endpoints, database tables)
+- MCP server: OAuth flow fully integrated
+- OAuth endpoints: `/oauth/start`, `/oauth/callback`, `/oauth/refresh`
+- OncallsClient now supports `fromOAuthTokens()` factory
+- Design doc: `docs/OAUTH_DESIGN.md`
+- V3 implementation spec: `/data/dev/oncalls-v3/docs/OAUTH_AUTHORIZATION_SERVER.md`
 
-- `src/tools/queries/get-oncall-schedule.ts`
-- `src/tools/queries/get-my-schedule.ts`
-- `src/tools/queries/get-my-requests.ts`
-- `src/tools/queries/get-physician-contact.ts`
-- `src/tools/queries/get-shift-types.ts`
-- `src/tools/admin/list-members.ts`
-- `src/tools/admin/list-pending-requests.ts`
-- `src/tools/admin/list-pending-volunteers.ts`
+---
 
-#### 3. Privacy Policy
+## 🚧 REMAINING WORK
+
+### For Anthropic Directory Submission (Blockers)
+
+#### 1. Privacy Policy
 
 - Create content for privacy policy
 - Publish at https://oncalls.com/privacy
@@ -205,30 +194,30 @@ cd /Users/jmr/dev/mcp-server-oncalls
 
 ## 🗺️ ROADMAP
 
-### Phase 1: Quick Wins (Today)
+### Phase 1: Quick Wins ✅ DONE
 
-- [ ] Add safety annotations to all 8 tools
-- [ ] Expand README with troubleshooting guide
-- [ ] Publish npm v1.1.0
+- [x] Add safety annotations to all 8 tools
+- [x] Publish npm v1.1.0
+- [x] Publish npm v1.2.0 (with OAuth)
 
-### Phase 2: Legal/Policy (This Week)
+### Phase 2: OAuth 2.0 ✅ DONE
+
+- [x] Design OAuth flow for OnCalls
+- [x] Implement OAuth Authorization Server in V3 backend
+- [x] Update MCP server to use OAuth
+- [x] Add OAuth endpoints (/oauth/start, /oauth/callback, /oauth/refresh)
+- [x] Deploy updated MCP server v1.2.0
+
+### Phase 3: Legal/Policy (Current)
 
 - [ ] Draft privacy policy
 - [ ] Draft terms of service
 - [ ] Publish both on oncalls.com
 - [ ] Create logo SVG
 
-### Phase 3: OAuth 2.0 (Next Sprint)
-
-- [ ] Design OAuth flow for OnCalls
-- [ ] Add `/oauth/authorize` endpoint to OnCalls Flask
-- [ ] Add `/oauth/token` endpoint to OnCalls Flask
-- [ ] Update MCP server to use OAuth
-- [ ] Test full OAuth flow
-- [ ] Deploy updated MCP server
-
 ### Phase 4: Submission
 
+- [ ] Test full OAuth flow end-to-end
 - [ ] Complete Anthropic form
 - [ ] Submit for review
 - [ ] Address any feedback
