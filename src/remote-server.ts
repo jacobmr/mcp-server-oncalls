@@ -13,7 +13,7 @@ import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
 
 const SERVER_NAME = 'oncalls-remote';
-const SERVER_VERSION = '1.0.0';
+const SERVER_VERSION = '1.1.0';
 
 // Store active transports by session ID
 const activeTransports = new Map<string, SSEServerTransport>();
