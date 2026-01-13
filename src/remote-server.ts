@@ -21,7 +21,7 @@ import { getToolsForUser, findTool } from './tools/index.js';
 import { toMcpError } from './utils/index.js';
 
 const SERVER_NAME = 'oncalls-remote';
-const SERVER_VERSION = '1.7.0';
+const SERVER_VERSION = '1.8.0';
 
 // OAuth Configuration
 const OAUTH_CONFIG = {
@@ -716,16 +716,94 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
     await transport.handlePostMessage(req, res, req.body);
   });
 
-  // Also handle POST to /sse (some clients send messages there instead of /message)
-  app.post('/sse', async (req: Request, res: Response) => {
+  // Handle POST to /sse - supports both:
+  // 1. Streamable HTTP initialization (mcp-remote uses http-first strategy on /sse URL)
+  // 2. SSE transport messages (legacy clients with sessionId)
+  app.post('/sse', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     const sessionId = req.query.sessionId as string;
+    const headerSessionId = req.headers['mcp-session-id'] as string | undefined;
 
+    // Check if this is a Streamable HTTP request (no sessionId in query, may have header or init request)
     if (!sessionId) {
-      console.log(`[${SERVER_NAME}] POST /sse missing sessionId`);
-      res.status(400).json({ error: 'Missing sessionId parameter' });
+      // Handle as Streamable HTTP transport
+      console.log(`[${SERVER_NAME}] POST /sse - treating as Streamable HTTP`);
+
+      try {
+        const client = req.oncallsClient!;
+        let transport: StreamableHTTPServerTransport | undefined;
+
+        if (headerSessionId && activeTransports.has(headerSessionId)) {
+          const existingTransport = activeTransports.get(headerSessionId);
+          if (existingTransport instanceof StreamableHTTPServerTransport) {
+            transport = existingTransport;
+          } else {
+            res.status(400).json({
+              jsonrpc: '2.0',
+              error: { code: -32000, message: 'Session uses different transport protocol' },
+              id: null,
+            });
+            return;
+          }
+        } else if (!headerSessionId && isInitializeRequest(req.body)) {
+          // New Streamable HTTP session on /sse endpoint
+          console.log(`[${SERVER_NAME}] Creating new Streamable HTTP session on /sse`);
+
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: (newSessionId: string) => {
+              console.log(
+                `[${SERVER_NAME}] Streamable HTTP session initialized (via /sse): ${newSessionId}`
+              );
+              activeTransports.set(newSessionId, transport!);
+              authenticatedClients.set(newSessionId, client);
+            },
+          });
+
+          transport.onclose = () => {
+            const sid = transport!.sessionId;
+            if (sid) {
+              console.log(`[${SERVER_NAME}] Streamable HTTP session closed (via /sse): ${sid}`);
+              activeTransports.delete(sid);
+              authenticatedClients.delete(sid);
+            }
+          };
+
+          const mcpServer = createMcpServer(client);
+          await mcpServer.connect(transport);
+        } else if (headerSessionId) {
+          res.status(404).json({
+            jsonrpc: '2.0',
+            error: { code: -32000, message: 'Session not found' },
+            id: null,
+          });
+          return;
+        } else {
+          res.status(400).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32000,
+              message: 'Bad Request: No session ID or initialization request',
+            },
+            id: null,
+          });
+          return;
+        }
+
+        await transport.handleRequest(req, res, req.body);
+      } catch (error) {
+        console.error(`[${SERVER_NAME}] Error handling Streamable HTTP on /sse:`, error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: 'Internal server error' },
+            id: null,
+          });
+        }
+      }
       return;
     }
 
+    // Legacy SSE transport - sessionId provided in query
     const transport = activeTransports.get(sessionId);
     if (!transport) {
       console.log(`[${SERVER_NAME}] POST /sse unknown sessionId: ${sessionId}`);
@@ -733,14 +811,13 @@ export async function startRemoteServer(port: number = 3001): Promise<void> {
       return;
     }
 
-    // Only SSEServerTransport uses /sse POST endpoint
     if (!(transport instanceof SSEServerTransport)) {
       console.log(`[${SERVER_NAME}] POST /sse: wrong transport type for session ${sessionId}`);
       res.status(400).json({ error: 'Session uses different transport protocol' });
       return;
     }
 
-    console.log(`[${SERVER_NAME}] POST /sse for session: ${sessionId}`);
+    console.log(`[${SERVER_NAME}] POST /sse for SSE session: ${sessionId}`);
     await transport.handlePostMessage(req, res, req.body);
   });
 
